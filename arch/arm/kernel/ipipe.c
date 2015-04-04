@@ -209,7 +209,7 @@ EXPORT_SYMBOL_GPL(__ipipe_send_vnmi);
 #ifdef CONFIG_SMP_ON_UP
 struct static_key __ipipe_smp_key = STATIC_KEY_INIT_TRUE;
 
-unsigned __ipipe_processor_id(void)
+unsigned notrace __ipipe_processor_id(void)
 {
 	return raw_smp_processor_id();
 }
@@ -411,7 +411,7 @@ asmlinkage void __exception __ipipe_grab_irq(int irq, struct pt_regs *regs)
 
 static void __ipipe_do_IRQ(unsigned irq, void *cookie)
 {
-	handle_IRQ(irq, __this_cpu_ptr(&ipipe_percpu.tick_regs));
+	handle_IRQ(irq, raw_cpu_ptr(&ipipe_percpu.tick_regs));
 }
 
 #ifdef CONFIG_MMU
@@ -420,7 +420,7 @@ void __switch_mm_inner(struct mm_struct *prev, struct mm_struct *next,
 {
 #ifdef CONFIG_IPIPE_WANT_ACTIVE_MM
 	struct mm_struct ** const active_mm =
-		__this_cpu_ptr(&ipipe_percpu.active_mm);
+		raw_cpu_ptr(&ipipe_percpu.active_mm);
 #endif /* CONFIG_IPIPE_WANT_ACTIVE_MM */
 #ifdef CONFIG_IPIPE_WANT_PREEMPTIBLE_SWITCH
 	struct thread_info *const tip = current_thread_info();
@@ -479,7 +479,7 @@ void deferred_switch_mm(struct mm_struct *next)
 {
 #ifdef CONFIG_IPIPE_WANT_ACTIVE_MM
 	struct mm_struct ** const active_mm =
-		__this_cpu_ptr(&ipipe_percpu.active_mm);
+		raw_cpu_ptr(&ipipe_percpu.active_mm);
 	struct mm_struct *prev = *active_mm;
 #endif /* CONFIG_IPIPE_WANT_ACTIVE_MM */
 #ifdef CONFIG_IPIPE_WANT_PREEMPTIBLE_SWITCH

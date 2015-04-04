@@ -233,6 +233,7 @@ void giveup_vsx(struct task_struct *tsk)
 	giveup_altivec_maybe_transactional(tsk);
 	__giveup_vsx(tsk);
 }
+EXPORT_SYMBOL(giveup_vsx);
 
 void flush_vsx_to_thread(struct task_struct *tsk)
 {
@@ -635,8 +636,10 @@ void tm_recheckpoint(struct thread_struct *thread,
 	 * change and later in the trecheckpoint code, we have a userspace R1.
 	 * So let's hard disable over this region.
 	 */
-	local_irq_save(flags);
+	flags = hard_local_irq_save();
+#ifndef CONFIG_IPIPE
 	hard_irq_disable();
+#endif
 
 	/* The TM SPRs are restored here, so that TEXASR.FS can be set
 	 * before the trecheckpoint and no explosion occurs.
@@ -645,7 +648,7 @@ void tm_recheckpoint(struct thread_struct *thread,
 
 	__tm_recheckpoint(thread, orig_msr);
 
-	local_irq_restore(flags);
+	hard_local_irq_restore(flags);
 }
 
 static inline void tm_recheckpoint_new_task(struct task_struct *new)
@@ -887,7 +890,9 @@ struct task_struct *__switch_to(struct task_struct *prev,
 	 * window where the kernel stack SLB and the kernel stack are out
 	 * of sync. Hard disable here.
 	 */
+#ifndef CONFIG_IPIPE
 	hard_irq_disable();
+#endif
 
 	tm_recheckpoint_new_task(new);
 
@@ -1105,6 +1110,23 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 	return 0;
 }
 
+static void setup_ksp_vsid(struct task_struct *p, unsigned long sp)
+{
+#ifdef CONFIG_PPC_STD_MMU_64
+	unsigned long sp_vsid;
+	unsigned long llp = mmu_psize_defs[mmu_linear_psize].sllp;
+
+	if (mmu_has_feature(MMU_FTR_1T_SEGMENT))
+		sp_vsid = get_kernel_vsid(sp, MMU_SEGSIZE_1T)
+			<< SLB_VSID_SHIFT_1T;
+	else
+		sp_vsid = get_kernel_vsid(sp, MMU_SEGSIZE_256M)
+			<< SLB_VSID_SHIFT;
+	sp_vsid |= SLB_VSID_KERNEL | llp;
+	p->thread.ksp_vsid = sp_vsid;
+#endif
+}
+
 /*
  * Copy a thread..
  */
@@ -1184,21 +1206,8 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 	p->thread.vr_save_area = NULL;
 #endif
 
-#ifdef CONFIG_PPC_STD_MMU_64
-	if (mmu_has_feature(MMU_FTR_SLB)) {
-		unsigned long sp_vsid;
-		unsigned long llp = mmu_psize_defs[mmu_linear_psize].sllp;
+	setup_ksp_vsid(p, sp);
 
-		if (mmu_has_feature(MMU_FTR_1T_SEGMENT))
-			sp_vsid = get_kernel_vsid(sp, MMU_SEGSIZE_1T)
-				<< SLB_VSID_SHIFT_1T;
-		else
-			sp_vsid = get_kernel_vsid(sp, MMU_SEGSIZE_256M)
-				<< SLB_VSID_SHIFT;
-		sp_vsid |= SLB_VSID_KERNEL | llp;
-		p->thread.ksp_vsid = sp_vsid;
-	}
-#endif /* CONFIG_PPC_STD_MMU_64 */
 #ifdef CONFIG_PPC64 
 	if (cpu_has_feature(CPU_FTR_DSCR)) {
 		p->thread.dscr_inherit = current->thread.dscr_inherit;
@@ -1322,6 +1331,7 @@ void start_thread(struct pt_regs *regs, unsigned long start, unsigned long sp)
 	current->thread.tm_tfiar = 0;
 #endif /* CONFIG_PPC_TRANSACTIONAL_MEM */
 }
+EXPORT_SYMBOL(start_thread);
 
 #define PR_FP_ALL_EXCEPT (PR_FP_EXC_DIV | PR_FP_EXC_OVF | PR_FP_EXC_UND \
 		| PR_FP_EXC_RES | PR_FP_EXC_INV)
@@ -1461,6 +1471,29 @@ int get_unalign_ctl(struct task_struct *tsk, unsigned long adr)
 	return put_user(tsk->thread.align_ctl, (unsigned int __user *)adr);
 }
 
+#ifdef CONFIG_IPIPE
+
+int validate_sp(unsigned long sp, struct task_struct *p,
+		       unsigned long nbytes)
+{
+	unsigned long stack_page = (unsigned long)task_stack_page(p);
+
+	/*
+	 * We can't always know the bounds of the current stack when
+	 * built in legacy mode due to potentially foreign stack
+	 * contexts, so let's pretend the stack pointer is fine
+	 * in this case.
+	 */
+	if (IS_ENABLED(CONFIG_IPIPE_LEGACY) ||
+	    (sp >= stack_page + sizeof(struct thread_struct)
+	     && sp <= stack_page + THREAD_SIZE - nbytes))
+		return 1;
+
+	return 0;
+}
+
+#else /* !CONFIG_IPIPE */
+
 static inline int valid_irq_stack(unsigned long sp, struct task_struct *p,
 				  unsigned long nbytes)
 {
@@ -1485,7 +1518,6 @@ static inline int valid_irq_stack(unsigned long sp, struct task_struct *p,
 	return 0;
 }
 
-#ifdef CONFIG_IRQSTACKS
 int validate_sp(unsigned long sp, struct task_struct *p,
 		       unsigned long nbytes)
 {
@@ -1497,13 +1529,8 @@ int validate_sp(unsigned long sp, struct task_struct *p,
 
 	return valid_irq_stack(sp, p, nbytes);
 }
-#else
-int validate_sp(unsigned long sp, struct task_struct *p,
-		       unsigned long nbytes)
-{
-	return 0;
-}
-#endif
+
+#endif /* !CONFIG_IPIPE */
 
 EXPORT_SYMBOL(validate_sp);
 
@@ -1557,7 +1584,7 @@ void show_stack(struct task_struct *tsk, unsigned long *stack)
 		tsk = current;
 	if (sp == 0) {
 		if (tsk == current)
-			asm("mr %0,1" : "=r" (sp));
+			sp = current_stack_pointer();
 		else
 			sp = tsk->thread.ksp;
 	}
@@ -1595,7 +1622,7 @@ void show_stack(struct task_struct *tsk, unsigned long *stack)
 			struct pt_regs *regs = (struct pt_regs *)
 				(sp + STACK_FRAME_OVERHEAD);
 			lr = regs->link;
-			printk("--- Exception: %lx at %pS\n    LR = %pS\n",
+			printk("--- interrupt: %lx at %pS\n    LR = %pS\n",
 			       regs->trap, (void *)regs->nip, (void *)lr);
 			firstframe = 1;
 		}

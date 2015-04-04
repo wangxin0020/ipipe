@@ -83,7 +83,7 @@ static void __ipipe_ipi_demux(int irq, struct pt_regs *regs)
 
 	desc->ipipe_ack(irq, desc);
 
-	kstat_incr_irqs_this_cpu(irq, desc);
+	kstat_incr_irq_this_cpu(irq);
 
 	while (per_cpu(ipipe_ipi_message, cpu).value & IPIPE_MSG_IPI_MASK) {
 		for (ipi = IPIPE_MSG_CRITICAL_IPI; ipi <= IPIPE_MSG_RESCHEDULE_IPI; ++ipi) {
@@ -220,7 +220,7 @@ void __ipipe_enable_pipeline(void)
 
 	/* First, intercept all interrupts from the root
 	 * domain. Regular Linux interrupt handlers will receive
-	 * __this_cpu_ptr(&ipipe_percpu.tick_regs) for external IRQs,
+	 * raw_cpu_ptr(&ipipe_percpu.tick_regs) for external IRQs,
 	 * whatever cookie is passed here.
 	 */
 	for (irq = 0; irq < NR_IRQS; irq++)
@@ -326,7 +326,7 @@ static void __ipipe_do_IRQ(unsigned int irq, void *cookie)
 	struct pt_regs *regs, *old_regs;
 
 	/* Any sensible register frame will do for non-timer IRQs. */
-	regs = __this_cpu_ptr(&ipipe_percpu.tick_regs);
+	regs = raw_cpu_ptr(&ipipe_percpu.tick_regs);
 	old_regs = set_irq_regs(regs);
 	___do_irq(irq, regs);
 	set_irq_regs(old_regs);
@@ -335,7 +335,7 @@ static void __ipipe_do_IRQ(unsigned int irq, void *cookie)
 static void __ipipe_do_timer(unsigned int irq, void *cookie)
 {
 	check_stack_overflow();
-	timer_interrupt(__this_cpu_ptr(&ipipe_percpu.tick_regs));
+	timer_interrupt(raw_cpu_ptr(&ipipe_percpu.tick_regs));
 }
 
 int __ipipe_grab_timer(struct pt_regs *regs)
@@ -349,7 +349,7 @@ int __ipipe_grab_timer(struct pt_regs *regs)
 
 	ipipe_trace_irq_entry(IPIPE_TIMER_VIRQ);
 
-	tick_regs = __this_cpu_ptr(&ipipe_percpu.tick_regs);
+	tick_regs = raw_cpu_ptr(&ipipe_percpu.tick_regs);
 	tick_regs->msr = regs->msr;
 	tick_regs->nip = regs->nip;
 	if (ipd != &ipipe_root)
@@ -368,29 +368,20 @@ void __ipipe_pin_range_globally(unsigned long start, unsigned long end)
 	/* We don't support this. */
 }
 
+EXPORT_SYMBOL_GPL(show_stack);
+EXPORT_SYMBOL_GPL(_switch);
 #ifndef CONFIG_SMP
 EXPORT_SYMBOL_GPL(last_task_used_math);
 #endif
-
-EXPORT_SYMBOL_GPL(do_munmap);
-EXPORT_SYMBOL_GPL(__switch_to);
-EXPORT_SYMBOL_GPL(show_stack);
-EXPORT_SYMBOL_GPL(_switch);
-EXPORT_SYMBOL_GPL(tasklist_lock);
+#ifdef CONFIG_IPIPE_LEGACY
 #ifdef CONFIG_PPC64
 EXPORT_PER_CPU_SYMBOL(ppc64_tlb_batch);
 EXPORT_SYMBOL_GPL(switch_slb);
-EXPORT_SYMBOL_GPL(switch_stab);
 EXPORT_SYMBOL_GPL(__flush_tlb_pending);
-EXPORT_SYMBOL_GPL(mmu_linear_psize);
 #else  /* !CONFIG_PPC64 */
 void atomic_set_mask(unsigned long mask, unsigned long *ptr);
 void atomic_clear_mask(unsigned long mask, unsigned long *ptr);
-#ifdef FEW_CONTEXTS
-EXPORT_SYMBOL_GPL(nr_free_contexts);
-EXPORT_SYMBOL_GPL(context_mm);
-EXPORT_SYMBOL_GPL(steal_context);
-#endif	/* !FEW_CONTEXTS */
 EXPORT_SYMBOL_GPL(atomic_set_mask);
 EXPORT_SYMBOL_GPL(atomic_clear_mask);
 #endif	/* !CONFIG_PPC64 */
+#endif /* !CONFIG_IPIPE_LEGACY */
