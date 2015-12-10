@@ -132,7 +132,6 @@ END_FW_FTR_SECTION_IFSET(FW_FEATURE_SPLPAR)
 	COPY_SOFTISTATE(r11)
 	HARD_ENABLE_INTS
 	CURRENT_THREAD_INFO(r10, r1)
-#ifndef CONFIG_IPIPE_LEGACY
 	cmpldi	cr0,r0,NR_syscalls
 	blt	slow_path
 	ld	r11,TI_IPIPE(r10)
@@ -153,7 +152,6 @@ no_fastcall:
 	/* fastcall handler not implemented */
 	ld	r0,GPR0(r1)
 slow_path:
-#endif /* !CONFIG_IPIPE_LEGACY */
 	ld	r11,TI_IPIPE(r10)
 slow_path_check:
 	andi.	r12,r11,_TIP_NOTIFY
@@ -651,15 +649,9 @@ _GLOBAL(ret_from_except_lite)
 	HARD_DISABLE_INTS
 	CURRENT_THREAD_INFO(r9, r1)
 #ifdef CONFIG_IPIPE
-#ifdef CONFIG_IPIPE_LEGACY
-	bl	.__ipipe_check_root
-	cmpwi	r3,0
-	beq-	restore
-#else	
 	ld	r3,TI_IPIPE(r9)
 	andi.	r3,r3,_TIP_HEAD
 	bne-	restore
-#endif	
 #endif /* CONFIG_IPIPE */
 
 	ld	r3,_MSR(r1)

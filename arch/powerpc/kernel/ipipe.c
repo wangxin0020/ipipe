@@ -270,13 +270,7 @@ static int __ipipe_exit_irq(struct pt_regs *regs)
 #endif
 	}
 
-	/*
-	 * Testing for user_regs() eliminates foreign stack contexts,
-	 * including from legacy domains (CONFIG_IPIPE_LEGACY) which
-	 * did not set the foreign stack bit (foreign stacks are
-	 * always kernel-based).
-	 */
-	if (user_mode(regs) && ipipe_test_thread_flag(TIP_MAYDAY))
+	if (ipipe_test_thread_flag(TIP_MAYDAY))
 		__ipipe_call_mayday(regs);
 
 	if (root && !test_bit(IPIPE_STALL_FLAG, &__ipipe_root_status))
@@ -358,15 +352,3 @@ EXPORT_SYMBOL_GPL(_switch);
 #ifndef CONFIG_SMP
 EXPORT_SYMBOL_GPL(last_task_used_math);
 #endif
-#ifdef CONFIG_IPIPE_LEGACY
-#ifdef CONFIG_PPC64
-EXPORT_PER_CPU_SYMBOL(ppc64_tlb_batch);
-EXPORT_SYMBOL_GPL(switch_slb);
-EXPORT_SYMBOL_GPL(__flush_tlb_pending);
-#else  /* !CONFIG_PPC64 */
-void atomic_set_mask(unsigned long mask, unsigned long *ptr);
-void atomic_clear_mask(unsigned long mask, unsigned long *ptr);
-EXPORT_SYMBOL_GPL(atomic_set_mask);
-EXPORT_SYMBOL_GPL(atomic_clear_mask);
-#endif	/* !CONFIG_PPC64 */
-#endif /* !CONFIG_IPIPE_LEGACY */

@@ -235,7 +235,6 @@ static void init_stage(struct ipipe_domain *ipd)
 {
 	memset(&ipd->irqs, 0, sizeof(ipd->irqs));
 	mutex_init(&ipd->mutex);
-	__ipipe_legacy_init_stage(ipd);
 	__ipipe_hook_critical_ipi(ipd);
 }
 
@@ -852,9 +851,7 @@ int ipipe_request_irq(struct ipipe_domain *ipd,
 	unsigned long flags;
 	int ret = 0;
 
-#ifndef CONFIG_IPIPE_LEGACY
 	ipipe_root_only();
-#endif /* CONFIG_IPIPE_LEGACY */
 
 	if (handler == NULL ||
 	    (irq >= IPIPE_NR_XIRQS && !ipipe_virtual_irq_p(irq)))
@@ -889,9 +886,7 @@ void ipipe_free_irq(struct ipipe_domain *ipd,
 {
 	unsigned long flags;
 
-#ifndef CONFIG_IPIPE_LEGACY
 	ipipe_root_only();
-#endif /* CONFIG_IPIPE_LEGACY */
 
 	spin_lock_irqsave(&__ipipe_lock, flags);
 
@@ -1103,18 +1098,6 @@ void __weak ipipe_migration_hook(struct task_struct *p)
 {
 }
 
-#ifdef CONFIG_IPIPE_LEGACY
-
-static inline void complete_domain_migration(void) /* hw IRQs off */
-{
-	if (current->state & TASK_HARDENING) {
-		current->state &= ~TASK_HARDENING;
-		ipipe_set_thread_flag(TIP_HEAD);
-	}
-}
-
-#else /* !CONFIG_IPIPE_LEGACY */
-
 static void complete_domain_migration(void) /* hw IRQs off */
 {
 	struct ipipe_percpu_domain_data *p;
@@ -1147,8 +1130,6 @@ static void complete_domain_migration(void) /* hw IRQs off */
 		__ipipe_sync_pipeline(p->domain);
 }
 
-#endif /* !CONFIG_IPIPE_LEGACY */
-
 void __ipipe_complete_domain_migration(void)
 {
 	unsigned long flags;
@@ -1167,9 +1148,7 @@ int __ipipe_switch_tail(void)
 	hard_local_irq_disable();
 #endif
 	x = __ipipe_root_p;
-#ifndef CONFIG_IPIPE_LEGACY
 	if (x)
-#endif
 		complete_domain_migration();
 
 #ifndef CONFIG_IPIPE_WANT_PREEMPTIBLE_SWITCH

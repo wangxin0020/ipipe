@@ -451,7 +451,6 @@ sysenter_past_esp:
 
 	GET_THREAD_INFO(%ebp)
 #ifdef CONFIG_IPIPE
-#ifndef CONFIG_IPIPE_LEGACY
 	cmpl $(NR_syscalls),%eax
 	jb slow_path
 	testl $_TIP_HEAD,TI_ipipe(%ebp) /* implies that TIP_NOTIFY if set */
@@ -464,7 +463,6 @@ sysenter_past_esp:
 	/* fastcall handler not implemented */
 	movl PT_ORIG_EAX(%esp),%eax
 slow_path:
-#endif /* !CONFIG_IPIPE_LEGACY */
 	testl $_TIP_NOTIFY,TI_ipipe(%ebp)
 	jnz pipeline_sysenter
 	cmpl $(NR_syscalls),%eax

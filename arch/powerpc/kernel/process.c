@@ -1482,8 +1482,7 @@ int validate_sp(unsigned long sp, struct task_struct *p,
 	 * contexts, so let's pretend the stack pointer is fine
 	 * in this case.
 	 */
-	if (IS_ENABLED(CONFIG_IPIPE_LEGACY) ||
-	    (sp >= stack_page + sizeof(struct thread_struct)
+	if ((sp >= stack_page + sizeof(struct thread_struct)
 	     && sp <= stack_page + THREAD_SIZE - nbytes))
 		return 1;
 

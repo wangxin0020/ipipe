@@ -564,7 +564,6 @@ ENTRY(_system_call)
 	p2 = r7;
 	r0 = [p2+TI_IPIPE];
 	p4 = __NR_syscall;
-#ifndef CONFIG_IPIPE_LEGACY
 	cc = p4 <= p0;
 	if !cc jump slow_path;
 	cc = BITTST(r0,TIP_HEAD);
@@ -597,7 +596,6 @@ no_fastcall:
 	p2 = r7;
 	r0 = [p2+TI_IPIPE];
 slow_path:
-#endif /* !CONFIG_IPIPE_LEGACY */	
 	cc = BITTST(r0,TIP_NOTIFY);
 	if cc jump pipeline_syscall
 	cc = p4 <= p0;

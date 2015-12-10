@@ -788,19 +788,11 @@ ENTRY(ret_from_exception)
  UNWIND(.cantunwind	)
 #ifdef CONFIG_IPIPE
 	disable_irq
-#ifdef CONFIG_IPIPE_LEGACY
-	bl	__ipipe_check_root
-	cmp     r0, #1
- THUMB(	it ne)
-	bne	__ipipe_ret_to_user_irqs_disabled  @ Fast exit path over non-root domains
-	get_thread_info tsk
-#else /* !CONFIG_IPIPE_LEGACY */
 	get_thread_info tsk
 	ldr	r0, [tsk, #TI_IPIPE]
 	tst	r0, #_TIP_HEAD
  THUMB(	it ne)
 	bne	__ipipe_ret_to_user_irqs_disabled  @ Fast exit path over non-root domains
-#endif /* !CONFIG_IPIPE_LEGACY */
 #else /* !CONFIG_IPIPE */
 	get_thread_info tsk
 #endif /* !CONFIG_IPIPE */

@@ -420,8 +420,6 @@ void __ipipe_tracer_hrclock_initialized(void);
 #define __ipipe_tracer_hrclock_initialized()	do { } while(0)
 #endif /* !CONFIG_IPIPE_TRACE */
 
-#include <linux/ipipe_compat.h>
-
 #else	/* !CONFIG_IPIPE */
 
 #define __ipipe_root_p		1

@@ -1318,21 +1318,6 @@ int __ipipe_get_irq_priority(unsigned int irq)
 
 static inline int mayday_pending(struct pt_regs *regs)
 {
-#ifdef CONFIG_IPIPE_LEGACY
-	/*
-	 * Testing for user_regs() on Blackfin does NOT fully
-	 * eliminate foreign stack contexts, because of the forged
-	 * interrupt returns we do through __ipipe_call_irqtail. In
-	 * that case, we might have preempted a foreign stack context
-	 * in a high priority domain, with a single interrupt level
-	 * now pending after the irqtail unwinding is done, in which
-	 * case user_mode() is now true. Therefore we exclude foreign
-	 * stack contexts as they can't be mayday issuers, so that the
-	 * event does not get dispatched spuriously.
-	 */
-	if (ipipe_test_foreign_stack())
-		return 0;
-#endif
 	return user_mode(regs) && ipipe_test_thread_flag(TIP_MAYDAY);
 }
 

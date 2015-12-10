@@ -545,10 +545,6 @@ void arch_irq_work_raise(void)
 
 static inline void ipi_timer(void)
 {
-#if defined(CONFIG_IPIPE_LEGACY) && !defined(CONFIG_IPIPE_ARM_KUSER_TSC)
-	__ipipe_mach_update_tsc();
-#endif
-
 	tick_receive_broadcast();
 }
 

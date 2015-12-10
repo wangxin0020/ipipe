@@ -42,23 +42,6 @@ extern unsigned __ipipe_first_ipi;
 
 #define IPIPE_LAST_IPI		IPIPE_SERVICE_VNMI
 
-#ifdef CONFIG_IPIPE_LEGACY
-#define hard_smp_processor_id()						\
-	({								\
-		unsigned int cpunum;					\
-		__asm__ __volatile__ ("\n"				\
-			"1:	mrc p15, 0, %0, c0, c0, 5\n"		\
-			"	.pushsection \".alt.smp.init\", \"a\"\n" \
-			"	.long	1b\n"				\
-			"	mov	%0, #0\n"			\
-			"	.popsection"				\
-				      : "=r" (cpunum));			\
-		cpunum &= 0xFF;						\
-	})
-extern u32 __cpu_reverse_map[];
-#define ipipe_processor_id()  (__cpu_reverse_map[hard_smp_processor_id()])
-
-#else /* !legacy */
 #define hard_smp_processor_id()	raw_smp_processor_id()
 
 #ifdef CONFIG_SMP_ON_UP
@@ -86,7 +69,6 @@ unsigned __ipipe_processor_id(void);
 #else /* !SMP_ON_UP */
 #define ipipe_processor_id() raw_smp_processor_id()
 #endif /* !SMP_ON_UP */
-#endif /* !legacy */
 
 #define IPIPE_ARCH_HAVE_VIRQ_IPI
 
@@ -158,19 +140,6 @@ static inline unsigned ipipe_test_and_stall_root(void)
 #endif	/* !CONFIG_SMP */
 
 #endif /* !__ASSEMBLY__ */
-
-#ifdef CONFIG_IPIPE_LEGACY
-#define __IPIPE_FEATURE_PREEMPTIBLE_SWITCH	1
-#define __IPIPE_FEATURE_SYSINFO_V2		1
-
-#ifdef CONFIG_VFP
-#define __IPIPE_FEATURE_VFP_SAFE		1
-#endif
-
-#ifdef CONFIG_IPIPE_ARM_KUSER_TSC
-#define __IPIPE_FEATURE_KUSER_TSC		1
-#endif
-#endif /* CONFIG_IPIPE_LEGACY */
 
 #endif /* CONFIG_IPIPE */
 

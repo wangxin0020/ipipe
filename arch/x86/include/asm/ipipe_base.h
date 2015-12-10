@@ -192,15 +192,6 @@ static inline unsigned long ipipe_test_root(void)
 
 #endif /* !CONFIG_SMP */
 
-#ifdef CONFIG_IPIPE_LEGACY
-#define __ipipe_tick_irq	__ipipe_hrtimer_irq
-/*
- * The current Linux task is read from the PDA on x86, so this is
- * always safe, regardless of the active stack.
- */
-#define ipipe_safe_current()	current
-#endif
-
 #endif	/* !__ASSEMBLY__ */
 
 #endif	/* !__X86_IPIPE_BASE_H */

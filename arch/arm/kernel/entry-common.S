@@ -237,7 +237,6 @@ local_restart:
 #ifdef CONFIG_IPIPE
 	ldr	r10, [tsk, #TI_IPIPE]
  	ldr	r0, =(__ARM_NR_ipipe - __NR_SYSCALL_BASE)
-#ifndef CONFIG_IPIPE_LEGACY
 	cmp	scno, r0
 	bne	slow_path
 	tst	r10, #_TIP_HEAD
@@ -265,7 +264,6 @@ no_fastcall:
  	ldr	r0, =(__ARM_NR_ipipe - __NR_SYSCALL_BASE)
 	ldr	r10, [tsk, #TI_IPIPE]
 slow_path:
-#endif /* !CONFIG_IPIPE_LEGACY */	
 	tst	r10, #_TIP_NOTIFY
 	bne	pipeline_syscall
 	cmp	scno, r0

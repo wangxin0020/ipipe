@@ -42,23 +42,6 @@ extern unsigned __ipipe_first_ipi;
 
 #define IPIPE_LAST_IPI		IPIPE_SERVICE_VNMI
 
-#ifdef CONFIG_IPIPE_LEGACY
-#define hard_smp_processor_id()						\
-	({								\
-		unsigned int cpunum;					\
-		__asm__ __volatile__ ("\n"				\
-			"1:	mrc p15, 0, %0, c0, c0, 5\n"		\
-			"	.pushsection \".alt.smp.init\", \"a\"\n" \
-			"	.long	1b\n"				\
-			"	mov	%0, #0\n"			\
-			"	.popsection"				\
-				      : "=r" (cpunum));			\
-		cpunum &= 0xFF;						\
-	})
-extern u32 __cpu_logical_map[];
-#define ipipe_processor_id()  (__cpu_logical_map[hard_smp_processor_id()])
-
-#else /* !legacy */
 #define hard_smp_processor_id()	raw_smp_processor_id()
 
 #ifdef CONFIG_SMP_ON_UP
@@ -86,7 +69,6 @@ unsigned __ipipe_processor_id(void);
 #else /* !SMP_ON_UP */
 #define ipipe_processor_id() raw_smp_processor_id()
 #endif /* !SMP_ON_UP */
-#endif /* !legacy */
 
 #define IPIPE_ARCH_HAVE_VIRQ_IPI
 

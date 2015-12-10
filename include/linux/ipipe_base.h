@@ -245,43 +245,7 @@ void __ipipe_call_mayday(struct pt_regs *regs);
 #define hard_cond_local_irq_save()		hard_local_irq_save()
 #define hard_cond_local_irq_restore(flags)	hard_local_irq_restore(flags)
 
-#ifdef CONFIG_IPIPE_LEGACY
-
-#define IPIPE_FIRST_EVENT	IPIPE_NR_FAULTS
-#define IPIPE_EVENT_SCHEDULE	IPIPE_FIRST_EVENT
-#define IPIPE_EVENT_SIGWAKE	(IPIPE_FIRST_EVENT + 1)
-#define IPIPE_EVENT_SETSCHED	(IPIPE_FIRST_EVENT + 2)
-#define IPIPE_EVENT_SETAFFINITY	(IPIPE_FIRST_EVENT + 3)
-#define IPIPE_EVENT_EXIT	(IPIPE_FIRST_EVENT + 4)
-#define IPIPE_EVENT_CLEANUP	(IPIPE_FIRST_EVENT + 5)
-#define IPIPE_EVENT_HOSTRT	(IPIPE_FIRST_EVENT + 6)
-#define IPIPE_EVENT_SYSCALL	(IPIPE_FIRST_EVENT + 7)
-#define IPIPE_LAST_EVENT	IPIPE_EVENT_SYSCALL
-#define IPIPE_NR_EVENTS		(IPIPE_LAST_EVENT + 1)
-
-typedef int (*ipipe_event_handler_t)(unsigned int event,
-				     struct ipipe_domain *from,
-				     void *data);
-struct ipipe_legacy_context {
-	unsigned int domid;
-	int priority;
-	void *pdd;
-	ipipe_event_handler_t handlers[IPIPE_NR_EVENTS];
-};
-
-#define __ipipe_init_taskinfo(p)			\
-	do {						\
-		memset(p->ptd, 0, sizeof(p->ptd));	\
-	} while (0)
-
-#else /* !CONFIG_IPIPE_LEGACY */
-
-struct ipipe_legacy_context {
-};
-
 static inline void __ipipe_init_taskinfo(struct task_struct *p) { }
-
-#endif /* !CONFIG_IPIPE_LEGACY */
 
 #define __ipipe_serial_debug(__fmt, __args...)	raw_printk(__fmt, ##__args)
 
@@ -347,14 +311,5 @@ static inline void __ipipe_pin_mapping_globally(unsigned long start,
 						unsigned long end)
 { }
 #endif
-
-static inline void ipipe_preempt_root_only(void)
-{
-#if defined(CONFIG_IPIPE_DEBUG_CONTEXT) && \
-    defined(CONFIG_IPIPE_LEGACY) && \
-    !defined(CONFIG_IPIPE_HAVE_SAFE_THREAD_INFO)
-	ipipe_root_only();
-#endif
-}
 
 #endif	/* !__LINUX_IPIPE_BASE_H */

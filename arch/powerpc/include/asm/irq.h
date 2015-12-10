@@ -71,7 +71,7 @@ extern void ___do_irq(unsigned int irq, struct pt_regs *regs);
 
 int irq_choose_cpu(const struct cpumask *mask);
 
-#if defined(CONFIG_DEBUG_STACKOVERFLOW) && !defined(CONFIG_IPIPE_LEGACY)
+#ifdef CONFIG_DEBUG_STACKOVERFLOW
 void check_stack_overflow(void);
 #else
 static inline void check_stack_overflow(void)

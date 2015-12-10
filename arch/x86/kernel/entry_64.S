@@ -265,7 +265,6 @@ GLOBAL(system_call_after_swapgs)
 	CFI_ADJUST_CFA_OFFSET 6*8
 
 #ifdef CONFIG_IPIPE
-#ifndef CONFIG_IPIPE_LEGACY
 	test_syscall_nr ax
 	jb slow_path
 	testl $_TIP_HEAD, ASM_THREAD_INFO(TI_ipipe, %rsp, SIZEOF_PTREGS)
@@ -288,7 +287,6 @@ no_fastcall:
 	/* fastcall handler not implemented */
 	movq ORIG_RAX(%rsp), %rax
 slow_path:
-#endif /* !CONFIG_IPIPE_LEGACY */
 	testl $_TIP_NOTIFY, ASM_THREAD_INFO(TI_ipipe, %rsp, SIZEOF_PTREGS)
 	jnz pipeline_syscall
 	test_syscall_nr ax

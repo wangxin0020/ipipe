@@ -179,11 +179,9 @@ transfer_to_handler:
 2:	/* if from kernel, check interrupted DOZE/NAP mode and
          * check for stack overflow
          */
-#ifndef CONFIG_IPIPE_LEGACY	
 	lwz	r9,KSP_LIMIT(r12)
 	cmplw	r1,r9			/* if r1 <= ksp_limit */
 	ble-	stack_ovf		/* then the kernel stack overflowed */
-#endif	
 5:
 #if defined(CONFIG_6xx) || defined(CONFIG_E500)
 	CURRENT_THREAD_INFO(r9, r1)
@@ -308,7 +306,6 @@ _GLOBAL(DoSyscall)
 	stw	r11,_CCR(r1)
 #ifdef CONFIG_IPIPE
 	CURRENT_THREAD_INFO(r10, r1)
-#ifndef CONFIG_IPIPE_LEGACY	
 	cmplwi	cr0,r0,NR_syscalls
 	blt	slow_path
 	lwz	r11,TI_IPIPE(r10)
@@ -329,7 +326,6 @@ no_fastcall:
 	/* fastcall handler not implemented */
 	lwz	r0,GPR0(r1)
 slow_path:
-#endif /* !CONFIG_IPIPE_LEGACY */
 	lwz	r11,TI_IPIPE(r10)
 slow_path_check:
 	andi.	r12,r11,_TIP_NOTIFY
@@ -840,17 +836,10 @@ ret_from_except:
 	MTMSRD(r10)		/* disable interrupts */
 
 #ifdef CONFIG_IPIPE
-#ifdef CONFIG_IPIPE_LEGACY
-        bl __ipipe_check_root
-        cmpwi   r3, 0
-	mfmsr	r10		/* this is used later, might be messed */
-        beq- restore
-#else	
 	CURRENT_THREAD_INFO(r9, r1)
 	lwz	r0,TI_IPIPE(r9)
 	andi.	r0,r0,_TIP_HEAD
         bne-    restore
-#endif	
 #endif /* CONFIG_IPIPE */
 	lwz	r3,_MSR(r1)	/* Returning to user mode? */
 	andi.	r0,r3,MSR_PR

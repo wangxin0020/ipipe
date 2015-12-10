@@ -1670,9 +1670,6 @@ struct task_struct {
 #endif /* CONFIG_NUMA_BALANCING */
 
 	struct rcu_head rcu;
-#ifdef CONFIG_IPIPE_LEGACY
-	void *ptd[IPIPE_ROOT_NPTDKEYS];
-#endif
 
 	/*
 	 * cache last used pipe for splice

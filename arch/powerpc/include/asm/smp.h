@@ -76,14 +76,8 @@ int generic_check_cpu_restart(unsigned int cpu);
 /* 32-bit */
 extern int smp_hw_index[];
 
-#ifdef CONFIG_IPIPE_LEGACY
-extern int smp_logical_index[];
-#define raw_smp_processor_id()		(smp_logical_index[mfspr(SPRN_PIR)])
-#define hard_smp_processor_id() 	(smp_hw_index[raw_smp_processor_id()])
-#else
 #define raw_smp_processor_id()	(current_thread_info()->cpu)
-#define hard_smp_processor_id() 	(smp_hw_index[smp_processor_id()])
-#endif
+#define hard_smp_processor_id() (smp_hw_index[smp_processor_id()])
 
 static inline int get_hard_smp_processor_id(int cpu)
 {
@@ -93,10 +87,6 @@ static inline int get_hard_smp_processor_id(int cpu)
 static inline void set_hard_smp_processor_id(int cpu, int phys)
 {
 	smp_hw_index[cpu] = phys;
-#ifdef CONFIG_IPIPE_LEGACY
-	BUG_ON(phys >= NR_CPUS);
-	smp_logical_index[phys] = cpu;
-#endif
 }
 #endif
 

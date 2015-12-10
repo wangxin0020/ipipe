@@ -468,7 +468,7 @@ void migrate_irqs(void)
 }
 #endif
 
-#if defined(CONFIG_DEBUG_STACKOVERFLOW) && !defined(CONFIG_IPIPE_LEGACY)
+#ifdef CONFIG_DEBUG_STACKOVERFLOW
 
 void check_stack_overflow(void)
 {

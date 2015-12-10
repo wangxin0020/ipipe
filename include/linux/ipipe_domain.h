@@ -58,7 +58,6 @@ struct ipipe_domain {
 	} ____cacheline_aligned irqs[IPIPE_NR_IRQS];
 	const char *name;
 	struct mutex mutex;
-	struct ipipe_legacy_context legacy;
 };
 
 static inline void *
