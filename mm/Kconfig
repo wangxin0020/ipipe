@@ -635,3 +635,17 @@ config MAX_STACK_SIZE_MB
 	  changed to a smaller value in which case that is used.
 
 	  A sane initial value is 80 MB.
+
+config FORCE_COMMIT_MEMORY
+       bool "Force commit virtual memory"
+       default n
+       help
+         This option disables kernel mechanisms which tend to desync
+         the virtual memory view from the page table state for a
+         process. Typically, copy-on-write and on-demand PTE updates
+         are among these mechanisms.
+
+	 This feature is useful when the delay incurred in handling a
+	 processor fault for fixing up the current memory context is
+	 not acceptable for some use cases (e.g. real-time
+	 configurations).

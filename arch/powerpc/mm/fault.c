@@ -221,7 +221,7 @@ int __kprobes do_page_fault(struct pt_regs *regs, unsigned long address,
 
 	prev_state = exception_enter();
 
-	if (__ipipe_report_trap(IPIPE_TRAP_ACCESS, regs))
+	if (dovetail_trap(IPIPE_TRAP_ACCESS, regs))
 		return 0;
 
 	mm = current->mm;

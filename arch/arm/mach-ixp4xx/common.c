@@ -31,7 +31,6 @@
 #include <linux/cpu.h>
 #include <linux/pci.h>
 #include <linux/sched_clock.h>
-#include <linux/ipipe.h>
 #include <linux/ipipe_tickdev.h>
 #include <mach/udc.h>
 #include <mach/hardware.h>

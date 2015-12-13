@@ -2152,11 +2152,11 @@ static int __init uv_bau_init(void)
 	}
 
 	alloc_intr_gate(vector, uv_bau_message_intr1);
-#ifdef CONFIG_IPIPE
-	for_each_possible_cpu(cur_cpu)
-		per_cpu(vector_irq, cur_cpu)[vector] =
-			ipipe_apic_vector_irq(vector);
-#endif
+
+	if (irqs_pipelined())
+		for_each_possible_cpu(cur_cpu)
+			per_cpu(vector_irq, cur_cpu)[vector] =
+			apicm_vector_irq(vector);
 
 	for_each_possible_blade(uvhub) {
 		if (uv_blade_nr_possible_cpus(uvhub)) {

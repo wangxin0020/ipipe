@@ -93,36 +93,26 @@ static inline notrace void __hard_local_irq_restore(unsigned long flags)
 #ifdef CONFIG_IPIPE
 
 #include <linux/compiler.h>
-#include <linux/ipipe_trace.h>
-/*
- * Way too many inter-deps between low-level headers in this port, so
- * we redeclare the required bits we cannot pick from
- * <asm/ipipe_base.h> to prevent circular dependencies.
- */
-void ipipe_stall_root(void);
-void ipipe_unstall_root(void);
-unsigned long ipipe_test_root(void);
-unsigned long ipipe_test_and_stall_root(void);
-void ipipe_restore_root(unsigned long flags);
+#include <asm/irq_pipeline.h>
 
 /*
  * Interrupt pipe interface to linux/irqflags.h.
  */
 static inline notrace void arch_local_irq_disable(void)
 {
-	ipipe_stall_root();
+	root_irq_disable();
 	barrier();
 }
 
 static inline notrace void arch_local_irq_enable(void)
 {
 	barrier();
-	ipipe_unstall_root();
+	root_irq_enable();
 }
 
 static inline notrace unsigned long arch_local_save_flags(void)
 {
-	return ipipe_test_root() ? bfin_no_irqs : bfin_irq_flags;
+	return root_irqs_disabled() ? bfin_no_irqs : bfin_irq_flags;
 }
 
 static inline notrace int arch_irqs_disabled_flags(unsigned long flags)
@@ -134,7 +124,7 @@ static inline notrace unsigned long arch_local_irq_save(void)
 {
 	unsigned long flags;
 
-	flags = ipipe_test_and_stall_root() ? bfin_no_irqs : bfin_irq_flags;
+	flags = root_irq_save() ? bfin_no_irqs : bfin_irq_flags;
 	barrier();
 
 	return flags;
@@ -142,7 +132,7 @@ static inline notrace unsigned long arch_local_irq_save(void)
 
 static inline notrace void arch_local_irq_restore(unsigned long flags)
 {
-	ipipe_restore_root(flags == bfin_no_irqs);
+	root_irq_restore(flags == bfin_no_irqs);
 }
 
 static inline notrace unsigned long arch_mangle_irq_bits(int virt, unsigned long real)
@@ -164,50 +154,10 @@ static inline notrace int arch_demangle_irq_bits(unsigned long *x)
 /*
  * Interface to various arch routines that may be traced.
  */
-#ifdef CONFIG_IPIPE_TRACE_IRQSOFF
-static inline notrace void hard_local_irq_disable(void)
-{
-	if (!hard_irqs_disabled()) {
-		__hard_local_irq_disable();
-		ipipe_trace_begin(0x80000000);
-	}
-}
-
-static inline notrace void hard_local_irq_enable(void)
-{
-	if (hard_irqs_disabled()) {
-		ipipe_trace_end(0x80000000);
-		__hard_local_irq_enable();
-	}
-}
-
-static inline notrace unsigned long hard_local_irq_save(void)
-{
-	unsigned long flags = hard_local_save_flags();
-	if (!hard_irqs_disabled_flags(flags)) {
-		__hard_local_irq_disable();
-		ipipe_trace_begin(0x80000001);
-	}
-	return flags;
-}
-
-static inline notrace void hard_local_irq_restore(unsigned long flags)
-{
-	if (!hard_irqs_disabled_flags(flags)) {
-		ipipe_trace_end(0x80000001);
-		__hard_local_irq_enable();
-	}
-}
-
-#else /* !CONFIG_IPIPE_TRACE_IRQSOFF */
 # define hard_local_irq_disable()	__hard_local_irq_disable()
 # define hard_local_irq_enable()	__hard_local_irq_enable()
 # define hard_local_irq_save()		__hard_local_irq_save()
 # define hard_local_irq_restore(flags)	__hard_local_irq_restore(flags)
-#endif /* !CONFIG_IPIPE_TRACE_IRQSOFF */
-
-#define hard_cond_local_irq_save()		hard_local_irq_save()
-#define hard_cond_local_irq_restore(flags)	hard_local_irq_restore(flags)
 
 static inline notrace unsigned long hard_local_irq_save_notrace(void)
 {
@@ -227,6 +177,18 @@ static inline notrace void hard_local_irq_disable_notrace(void)
 static inline notrace void hard_local_irq_enable_notrace(void)
 {
 	return __hard_local_irq_enable();
+}
+
+static inline
+void arch_save_timer_regs(struct pt_regs *dst,
+			  struct pt_regs *src, bool head_context)
+{
+	dst->ipend = src->ipend;
+	dst->pc = src->pc;
+	if (head_context)
+		dst->ipend &= ~0x10;
+	else
+		dst->ipend |= 0x10;
 }
 
 #else /* !CONFIG_IPIPE */
@@ -249,8 +211,6 @@ static inline notrace void hard_local_irq_enable_notrace(void)
 #define hard_local_irq_restore(flags)	__hard_local_irq_restore(flags)
 #define hard_local_irq_enable()		__hard_local_irq_enable()
 #define hard_local_irq_disable()	__hard_local_irq_disable()
-#define hard_cond_local_irq_save()		hard_local_save_flags()
-#define hard_cond_local_irq_restore(flags)	do { (void)(flags); } while (0)
 
 #endif /* !CONFIG_IPIPE */
 

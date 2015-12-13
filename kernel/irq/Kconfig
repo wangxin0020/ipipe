@@ -73,6 +73,13 @@ config GENERIC_MSI_IRQ_DOMAIN
 config HANDLE_DOMAIN_IRQ
 	bool
 
+config IRQ_MUTE
+       bool
+
+# Interrupt pipeline
+config HAVE_IPIPE
+       bool
+
 config IRQ_DOMAIN_DEBUG
 	bool "Expose hardware/virtual IRQ mapping via debugfs"
 	depends on IRQ_DOMAIN && DEBUG_FS
@@ -99,5 +106,26 @@ config SPARSE_IRQ
 	    out the interrupt descriptors in a more NUMA-friendly way. )
 
 	  If you don't know what to do here, say N.
+
+config IRQ_PIPELINE
+	bool "Interrupt pipeline"
+	depends on HAVE_IPIPE
+	select IPIPE
+	select IRQ_DOMAIN
+	select IRQ_MUTE
+	default y
+	---help---
+	  Activate this option if you want the interrupt pipeline to be
+	  compiled in.
+
+config IPIPE_CORE_APIREV
+       int
+       depends on IPIPE
+       default 3
+	---help---
+	  The API revision level we implement.
+
+config IPIPE
+       bool
 
 endmenu

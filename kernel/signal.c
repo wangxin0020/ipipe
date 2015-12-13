@@ -691,8 +691,8 @@ void signal_wake_up_state(struct task_struct *t, unsigned int state)
 {
 	set_tsk_thread_flag(t, TIF_SIGPENDING);
 
-	/* TIF_SIGPENDING must be prior to reporting. */
-	__ipipe_report_sigwake(t);
+	/* TIF_SIGPENDING must be set prior to notifying. */
+	dovetail_signal_task(t);
 
 	/*
 	 * TASK_WAKEKILL also means wake it up in the stopped/traced/killable
@@ -919,7 +919,7 @@ static inline int wants_signal(int sig, struct task_struct *p)
 		return 1;
 	if (task_is_stopped_or_traced(p)) {
 		if (!signal_pending(p))
-			__ipipe_report_sigwake(p);
+			dovetail_signal_task(p);
 		return 0;
 	}
 	return task_curr(p) || !signal_pending(p);

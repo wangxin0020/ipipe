@@ -21,6 +21,7 @@ int main(void)
 	/* offsets into the task struct */
 	DEFINE(TASK_STATE, offsetof(struct task_struct, state));
 	DEFINE(TASK_FLAGS, offsetof(struct task_struct, flags));
+	DEFINE(TI_LOCAL_FLAGS, offsetof(struct thread_info, local_flags));
 	DEFINE(TASK_PTRACE, offsetof(struct task_struct, ptrace));
 	DEFINE(TASK_BLOCKED, offsetof(struct task_struct, blocked));
 	DEFINE(TASK_THREAD, offsetof(struct task_struct, thread));
@@ -161,9 +162,8 @@ int main(void)
 #endif
 
 #ifdef CONFIG_IPIPE
-	DEFINE(IPIPE_CURRENT_DOMAIN, offsetof(struct ipipe_percpu_data, curr));
-	DEFINE(IPIPE_DOMAIN_DESC, offsetof(struct ipipe_percpu_domain_data, domain));
-	DEFINE(TI_IPIPE, offsetof(struct thread_info, ipipe_flags));
+	DEFINE(IPIPE_CURRENT_DOMAIN, offsetof(struct irq_pipeline_data, curr));
+	DEFINE(IPIPE_DOMAIN_DESC, offsetof(struct irq_stage_data, stage));
 #endif
 
 	return 0;

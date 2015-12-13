@@ -23,7 +23,6 @@
 #include <linux/err.h>
 #include <linux/interrupt.h>
 #include <linux/ipipe_tickdev.h>
-#include <linux/ipipe.h>
 #include <linux/irq.h>
 #include <linux/clockchips.h>
 #include <linux/clk.h>

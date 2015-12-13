@@ -74,26 +74,7 @@ EXPORT_SYMBOL_GPL(pm_power_off);
 
 void (*arm_pm_restart)(enum reboot_mode reboot_mode, const char *cmd);
 
-#ifdef CONFIG_IPIPE
-static void __ipipe_halt_root(void)
-{
-	struct ipipe_percpu_domain_data *p;
-
-	/*
-	 * Emulate idle entry sequence over the root domain, which is
-	 * stalled on entry.
-	 */
-	hard_local_irq_disable();
-
-	p = ipipe_this_cpu_root_context();
-	__clear_bit(IPIPE_STALL_FLAG, &p->status);
-
-	if (unlikely(__ipipe_ipending_p(p)))
-		__ipipe_sync_stage();
-	else {
-		cpu_do_idle();
-	}
-}
+#ifdef CONFIG_DOVETAIL
 
 #define FPSIMD_EN (0x3 << 20)
 static inline void disable_fpsimd(void)
@@ -110,16 +91,12 @@ static inline void disable_fpsimd(void)
 	hard_local_irq_restore(flags);
 }
 
-#else /* !CONFIG_IPIPE */
-static void __ipipe_halt_root(void)
-{
-	cpu_do_idle();
-}
+#else
 
 static inline void disable_fpsimd(void)
 { }
 
-#endif /* !CONFIG_IPIPE */
+#endif /* !CONFIG_DOVETAIL */
 
 /*
  * This is our default idle handler.
@@ -130,9 +107,10 @@ void arch_cpu_idle(void)
 	 * This should do all the clock switching and wait for interrupt
 	 * tricks
 	 */
-	if (!need_resched())
-		__ipipe_halt_root();
-	local_irq_enable();
+	if (irq_pipeline_idle()) {
+		cpu_do_idle();
+		local_irq_enable();
+	}
 }
 
 #ifdef CONFIG_HOTPLUG_CPU

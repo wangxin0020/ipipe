@@ -20,6 +20,7 @@
 #include <linux/shrinker.h>
 #include <linux/resource.h>
 #include <linux/page_ext.h>
+#include <linux/dovetail.h>
 
 struct mempolicy;
 struct anon_vma;
@@ -2226,6 +2227,39 @@ static inline bool page_is_guard(struct page *page) { return false; }
 void __init setup_nr_node_ids(void);
 #else
 static inline void setup_nr_node_ids(void) {}
+#endif
+
+#ifdef CONFIG_FORCE_COMMIT_MEMORY
+
+int commit_vma(struct mm_struct *mm, struct vm_area_struct *vma);
+int force_commit_memory(struct task_struct *tsk);
+void pin_mapping_globally(unsigned long start,
+			  unsigned long end);
+void arch_pin_mapping_globally(unsigned long start,
+			       unsigned long end);
+
+static inline bool memory_commit_forced(void)
+{
+	return IS_ENABLED(CONFIG_FORCE_COMMIT_MEMORY);
+}
+
+#else
+
+static inline
+void pin_mapping_globally(unsigned long start,
+			  unsigned long end) {}
+
+static inline bool memory_commit_forced(void)
+{
+	return false;
+}
+
+static inline
+int commit_vma(struct mm_struct *mm, struct vm_area_struct *vma)
+{
+	return 0;
+}
+
 #endif
 
 #endif /* __KERNEL__ */

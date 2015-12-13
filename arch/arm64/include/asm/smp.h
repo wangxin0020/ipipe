@@ -24,6 +24,19 @@
 # error "<asm/smp.h> included in non-SMP build"
 #endif
 
+enum ipi_msg_type {
+	IPI_RESCHEDULE,
+	IPI_CALL_FUNC,
+	IPI_CPU_STOP,
+	IPI_TIMER,
+	IPI_IRQ_WORK,
+#ifdef CONFIG_IRQ_PIPELINE	
+	IPI_PIPELINE_CRITICAL,
+	IPI_PIPELINE_HRTIMER,
+	IPI_PIPELINE_RESCHEDULE,
+#endif
+};
+
 #define raw_smp_processor_id() (current_thread_info()->cpu)
 
 struct seq_file;
@@ -34,9 +47,14 @@ struct seq_file;
 extern void show_ipi_list(struct seq_file *p, int prec);
 
 /*
- * Called from C code, this handles an IPI.
+ * Called from C code, this handles an IPI (including pipelined ones).
  */
 extern void handle_IPI(int ipinr, struct pt_regs *regs);
+
+/*
+ * Handles IPIs for the root stage exclusively.
+ */
+void __handle_IPI(int ipinr, struct pt_regs *regs);
 
 /*
  * Discover the set of possible CPUs and determine their
@@ -50,6 +68,11 @@ extern void of_smp_init_cpus(void);
 extern void set_smp_cross_call(void (*)(const struct cpumask *, unsigned int));
 
 extern void (*__smp_cross_call)(const struct cpumask *, unsigned int);
+
+/*
+ * Raise an IPI.
+ */
+void smp_cross_call(const struct cpumask *target, unsigned int ipinr);
 
 /*
  * Called from the secondary holding pen, this is the secondary CPU entry point.
@@ -72,5 +95,10 @@ extern int __cpu_disable(void);
 
 extern void __cpu_die(unsigned int cpu);
 extern void cpu_die(void);
+
+/*
+ * create the interrupt domain for mapping IPIs.
+ */
+extern void smp_create_ipi_domain(void);
 
 #endif /* ifndef __ASM_SMP_H */

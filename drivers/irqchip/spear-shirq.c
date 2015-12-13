@@ -198,7 +198,7 @@ static void shirq_handler(unsigned irq, struct irq_desc *desc)
 		int irq = __ffs(pend);
 
 		pend &= ~(0x1 << irq);
-		ipipe_handle_demuxed_irq(shirq->virq_base + irq);
+		generic_handle_irq(shirq->virq_base + irq);
 	}
 }
 

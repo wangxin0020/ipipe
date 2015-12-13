@@ -44,7 +44,7 @@ ENTRY(_ins##func) \
 	[--SP] = RETS; \
 	[--SP] = (P5:0); \
 	SP += -12; \
-	CALL ___ipipe_hard_save_root_irqs; \
+	CALL _mute_low_priority_irqs; \
 	SP += 12; \
 	R3 = R0;\
 	(P5:0) = [SP++];\
@@ -54,7 +54,7 @@ ENTRY(_ins##func) \
 2:	nop; \
 	R0 = R3;\
 	SP += -12; \
-	CALL ___ipipe_hard_restore_root_irqs; \
+	CALL _unmute_low_priority_irqs; \
 	SP += 12; \
 	RETS = [SP++];\
 	RTS; \

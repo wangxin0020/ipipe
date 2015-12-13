@@ -475,7 +475,7 @@ do_alignment_ldrstr(unsigned long addr, unsigned long instr, struct pt_regs *reg
  *
  * B = rn pointer before instruction, A = rn pointer after instruction
  *              ------ increasing address ----->
- *		|    | r0 | r1 | ... | rx |    |
+ *	        |    | r0 | r1 | ... | rx |    |
  * PU = 01             B                    A
  * PU = 11        B                    A
  * PU = 00        A                    B
@@ -762,7 +762,7 @@ do_alignment(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 	if (interrupts_enabled(regs))
 		hard_local_irq_enable();
 
-	if (__ipipe_report_trap(IPIPE_TRAP_ALIGNMENT,regs))
+	if (dovetail_trap(IPIPE_TRAP_ALIGNMENT, regs))
 		return 0;
 
 	instrptr = instruction_pointer(regs);
@@ -924,7 +924,7 @@ do_alignment(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 			task_pid_nr(current), instrptr,
 			isize << 1,
 			isize == 2 ? tinstr : instr,
-			addr, fsr);
+		        addr, fsr);
 
 	if (ai_usermode & UM_FIXUP)
 		goto fixup;

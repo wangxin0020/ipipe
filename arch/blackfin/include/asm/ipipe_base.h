@@ -30,10 +30,6 @@
 
 #define IPIPE_NR_XIRQS		NR_IRQS
 
-/* Blackfin-specific, per-cpu pipeline status */
-#define IPIPE_SYNCDEFER_FLAG	15
-#define IPIPE_SYNCDEFER_MASK	(1L << IPIPE_SYNCDEFER_MASK)
-
 /*
  * Blackfin traps -- i.e. exception vector numbers, we leave a gap
  * after VEC_ILL_RES.
@@ -43,27 +39,11 @@
 
 #ifndef __ASSEMBLY__
 
-extern unsigned long __ipipe_root_status;
-
-void ipipe_stall_root(void);
-
-unsigned long ipipe_test_and_stall_root(void);
-
-unsigned long ipipe_test_root(void);
-
 void __ipipe_lock_root(void);
 
 void __ipipe_unlock_root(void);
 
-int __ipipe_do_sync_check(void);
-#define __ipipe_sync_check __ipipe_do_sync_check()
-
-static inline unsigned long __ipipe_ffnz(unsigned long ul)
-{
-	return ffs(ul) - 1;
-}
-
-#define __ipipe_run_irqtail(irq)  /* Must be a macro */			\
+#define irq_finish_head(irq)  /* Must be a macro */			\
 	do {								\
 		unsigned long __pending;				\
 		CSYNC();						\
@@ -74,9 +54,6 @@ static inline unsigned long __ipipe_ffnz(unsigned long ul)
 				__ipipe_call_irqtail(__ipipe_irq_tail_hook); \
 		}							\
 	} while (0)
-
-#define __ipipe_syscall_watched_p(p, sc)	\
-	(ipipe_notifier_enabled_p(p) || (unsigned long)sc >= NR_syscalls)
 
 #endif /* !__ASSEMBLY__ */
 

@@ -15,6 +15,9 @@ enum {
 	_IRQ_NESTED_THREAD	= IRQ_NESTED_THREAD,
 	_IRQ_PER_CPU_DEVID	= IRQ_PER_CPU_DEVID,
 	_IRQ_IS_POLLED		= IRQ_IS_POLLED,
+	_IRQ_PIPELINED		= IRQ_PIPELINED,
+	_IRQ_STICKY		= IRQ_STICKY,
+	_IRQ_CHAINED		= IRQ_CHAINED,
 	_IRQF_MODIFY_MASK	= IRQF_MODIFY_MASK,
 };
 
@@ -28,6 +31,9 @@ enum {
 #define IRQ_NESTED_THREAD	GOT_YOU_MORON
 #define IRQ_PER_CPU_DEVID	GOT_YOU_MORON
 #define IRQ_IS_POLLED		GOT_YOU_MORON
+#define IRQ_PIPELINED		GOT_YOU_MORON
+#define IRQ_STICKY		GOT_YOU_MORON
+#define IRQ_CHAINED		GOT_YOU_MORON
 #undef IRQF_MODIFY_MASK
 #define IRQF_MODIFY_MASK	GOT_YOU_MORON
 
@@ -135,6 +141,31 @@ static inline void irq_settings_set_noprobe(struct irq_desc *desc)
 	desc->status_use_accessors |= _IRQ_NOPROBE;
 }
 
+static inline void irq_settings_set_chained(struct irq_desc *desc)
+{
+	desc->status_use_accessors |= _IRQ_CHAINED;
+}
+
+static inline void irq_settings_set_pipelined(struct irq_desc *desc)
+{
+	desc->status_use_accessors |= _IRQ_PIPELINED;
+}
+
+static inline void irq_settings_clr_pipelined(struct irq_desc *desc)
+{
+	desc->status_use_accessors &= ~_IRQ_PIPELINED;
+}
+
+static inline void irq_settings_set_sticky(struct irq_desc *desc)
+{
+	desc->status_use_accessors |= _IRQ_STICKY;
+}
+
+static inline void irq_settings_clr_sticky(struct irq_desc *desc)
+{
+	desc->status_use_accessors &= ~_IRQ_STICKY;
+}
+
 static inline bool irq_settings_can_move_pcntxt(struct irq_desc *desc)
 {
 	return desc->status_use_accessors & _IRQ_MOVE_PCNTXT;
@@ -153,4 +184,19 @@ static inline bool irq_settings_is_nested_thread(struct irq_desc *desc)
 static inline bool irq_settings_is_polled(struct irq_desc *desc)
 {
 	return desc->status_use_accessors & _IRQ_IS_POLLED;
+}
+
+static inline bool irq_settings_is_pipelined(struct irq_desc *desc)
+{
+	return desc->status_use_accessors & _IRQ_PIPELINED;
+}
+
+static inline bool irq_settings_is_sticky(struct irq_desc *desc)
+{
+	return desc->status_use_accessors & _IRQ_STICKY;
+}
+
+static inline bool irq_settings_is_chained(struct irq_desc *desc)
+{
+	return desc->status_use_accessors & _IRQ_CHAINED;
 }

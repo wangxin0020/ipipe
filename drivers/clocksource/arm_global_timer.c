@@ -24,7 +24,6 @@
 #include <linux/sched_clock.h>
 
 #include <asm/cputype.h>
-#include <asm/ipipe.h>
 
 #define GT_COUNTER0	0x00
 #define GT_COUNTER1	0x04
@@ -161,7 +160,7 @@ static irqreturn_t gt_clockevent_interrupt(int irq, void *dev_id)
 		gt_compare_set(ULONG_MAX, 0);
 
 	writel_relaxed(GT_INT_STATUS_EVENT_FLAG, gt_base + GT_INT_STATUS);
-	evt->event_handler(evt);
+	clockevents_handle_event(evt);
 
 	return IRQ_HANDLED;
 }
@@ -172,7 +171,7 @@ static int gt_clockevents_init(struct clock_event_device *clk)
 
 	clk->name = "arm_global_timer";
 	clk->features = CLOCK_EVT_FEAT_PERIODIC | CLOCK_EVT_FEAT_ONESHOT |
-		CLOCK_EVT_FEAT_PERCPU;
+		CLOCK_EVT_FEAT_PERCPU | CLOCK_EVT_FEAT_PIPELINE;
 	clk->set_mode = gt_clockevent_set_mode;
 	clk->set_next_event = gt_clockevent_set_next_event;
 	clk->cpumask = cpumask_of(cpu);
@@ -315,8 +314,8 @@ static void __init global_timer_of_register(struct device_node *np)
 			goto out_clk;
 		}
 
-		err = request_percpu_irq(gt_ppi, gt_clockevent_interrupt,
-				 "gt", gt_evt);
+		err = __request_percpu_irq(gt_ppi, gt_clockevent_interrupt,
+					   "gt", IRQF_TIMER, gt_evt);
 		if (err) {
 			pr_warn("global-timer: can't register interrupt %d (%d)\n",
 				gt_ppi, err);

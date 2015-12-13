@@ -34,7 +34,6 @@
 #include <linux/dmi.h>
 #include <linux/smp.h>
 #include <linux/mm.h>
-#include <linux/ipipe_tickdev.h>
 
 #include <asm/trace/irq_vectors.h>
 #include <asm/irq_remapping.h>
@@ -463,10 +462,13 @@ static int lapic_next_event(unsigned long delta,
 static int lapic_next_deadline(unsigned long delta,
 			       struct clock_event_device *evt)
 {
+	unsigned long flags;
 	u64 tsc;
 
+	flags = hard_cond_local_irq_save();
 	rdtscll(tsc);
 	wrmsrl(MSR_IA32_TSC_DEADLINE, tsc + (((u64) delta) * TSC_DIVISOR));
+	hard_cond_local_irq_restore(flags);
 	return 0;
 }
 
@@ -516,17 +518,6 @@ static void lapic_timer_broadcast(const struct cpumask *mask)
 #endif
 }
 
-#ifdef CONFIG_IPIPE
-static void lapic_itimer_ack(void)
-{
-	__ack_APIC_irq();
-}
-
-static DEFINE_PER_CPU(struct ipipe_timer, lapic_itimer) = {
-	.irq = ipipe_apic_vector_irq(LOCAL_TIMER_VECTOR),
-	.ack = lapic_itimer_ack,
-};
-#endif /* CONFIG_IPIPE */
 
 /*
  * The local apic timer can be used for any function which is CPU local.
@@ -534,15 +525,33 @@ static DEFINE_PER_CPU(struct ipipe_timer, lapic_itimer) = {
 static struct clock_event_device lapic_clockevent = {
 	.name		= "lapic",
 	.features	= CLOCK_EVT_FEAT_PERIODIC | CLOCK_EVT_FEAT_ONESHOT
-			| CLOCK_EVT_FEAT_C3STOP | CLOCK_EVT_FEAT_DUMMY,
+			| CLOCK_EVT_FEAT_C3STOP | CLOCK_EVT_FEAT_DUMMY
+			| CLOCK_EVT_FEAT_PIPELINE,
 	.shift		= 32,
 	.set_mode	= lapic_timer_setup,
 	.set_next_event	= lapic_next_event,
 	.broadcast	= lapic_timer_broadcast,
 	.rating		= 100,
-	.irq		= -1,
+	.irq		= LAPIC_TIMER_IRQ,
 };
 static DEFINE_PER_CPU(struct clock_event_device, lapic_events);
+
+#ifdef CONFIG_IRQ_PIPELINE
+
+static irqreturn_t lapic_hp_handler(int virq, void *dev_id)
+{
+	clockevents_handle_event(this_cpu_ptr(&lapic_events));
+
+	return IRQ_HANDLED;
+}
+
+static struct irqaction hp_timer_action = {
+	.handler = lapic_hp_handler,
+	.name = "High-precision LAPIC timer interrupt",
+	.flags = IRQF_TIMER,
+};
+
+#endif
 
 /*
  * Setup the local APIC timer for this CPU. Copy the initialized values
@@ -560,16 +569,6 @@ static void setup_APIC_timer(void)
 
 	memcpy(levt, &lapic_clockevent, sizeof(*levt));
 	levt->cpumask = cpumask_of(smp_processor_id());
-#ifdef CONFIG_IPIPE
-	if (!(lapic_clockevent.features & CLOCK_EVT_FEAT_DUMMY))
-		levt->ipipe_timer = this_cpu_ptr(&lapic_itimer);
-	else {
-		static atomic_t once = ATOMIC_INIT(-1);
-		if (atomic_inc_and_test(&once))
-			printk(KERN_INFO
-			       "I-pipe: cannot use LAPIC as a tick device\n");
-	}
-#endif /* CONFIG_IPIPE */
 
 	if (this_cpu_has(X86_FEATURE_TSC_DEADLINE_TIMER)) {
 		levt->features &= ~(CLOCK_EVT_FEAT_PERIODIC |
@@ -580,6 +579,10 @@ static void setup_APIC_timer(void)
 						0xF, ~0UL);
 	} else
 		clockevents_register_device(levt);
+
+#ifdef CONFIG_IRQ_PIPELINE
+	setup_irq(LAPIC_TIMER_IRQ, &hp_timer_action);
+#endif
 }
 
 /*

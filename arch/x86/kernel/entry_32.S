@@ -45,7 +45,6 @@
 #include <linux/err.h>
 #include <asm/thread_info.h>
 #include <asm/irqflags.h>
-#include <asm/ipipe_base.h>
 #include <asm/errno.h>
 #include <asm/segment.h>
 #include <asm/smp.h>
@@ -84,33 +83,6 @@
  * Allowing a register to be clobbered can shrink the paravirt replacement
  * enough to patch inline, increasing performance.
  */
-
-#ifdef CONFIG_IPIPE
-#define PREEMPT_SCHEDULE_IRQ	call __ipipe_preempt_schedule_irq
-
-#ifdef CONFIG_IPIPE_TRACE_IRQSOFF
-# define IPIPE_TRACE_IRQ_ENTER \
-	movl PT_ORIG_EAX(%esp), %eax; \
-	lea PT_EIP-4(%esp), %ebp; \
-	cmp $0, %eax; \
-	jge 9998f; \
-	not %eax; \
-9998:	call ipipe_trace_begin
-# define IPIPE_TRACE_IRQ_EXIT \
-	pushl %eax; \
-	movl PT_ORIG_EAX+4(%esp), %eax; \
-	cmp $0, %eax; \
-	jge 9999f; \
-	not %eax; \
-9999:	call ipipe_trace_end; \
-	popl %eax
-#else  /* !CONFIG_IPIPE_TRACE_IRQSOFF */
-#define IPIPE_TRACE_IRQ_ENTER
-#define IPIPE_TRACE_IRQ_EXIT
-#endif /* CONFIG_IPIPE_TRACE_IRQSOFF */
-#else /* !CONFIG_IPIPE */
-#define PREEMPT_SCHEDULE_IRQ		call preempt_schedule_irq
-#endif /* CONFIG_IPIPE */
 
 #ifdef CONFIG_PREEMPT
 #define preempt_stop(clobbers)	DISABLE_INTERRUPTS(clobbers); TRACE_IRQS_OFF
@@ -316,7 +288,7 @@
 .endm
 
 ENTRY(ret_from_fork)
-	HARD_COND_ENABLE_INTERRUPTS
+	ENABLE_INTERRUPTS_IF_PIPELINED(CLBR_NONE)
 	CFI_STARTPROC
 	pushl_cfi %eax
 	call schedule_tail
@@ -392,7 +364,7 @@ need_resched:
 	jnz restore_all
 	testl $X86_EFLAGS_IF,PT_EFLAGS(%esp)	# interrupts off (exception path) ?
 	jz restore_all
-	PREEMPT_SCHEDULE_IRQ
+	call preempt_schedule_irq
 	jmp need_resched
 END(resume_kernel)
 #endif
@@ -450,35 +422,35 @@ sysenter_past_esp:
 	_ASM_EXTABLE(1b,syscall_fault)
 
 	GET_THREAD_INFO(%ebp)
-#ifdef CONFIG_IPIPE
+#ifdef CONFIG_DOVETAIL
 	cmpl $(NR_syscalls),%eax
 	jb slow_path
-	testl $_TIP_HEAD,TI_ipipe(%ebp) /* implies that TIP_NOTIFY if set */
+	testl $_TLF_HEAD,TI_status(%ebp) /* implies _TLF_DOVETAIL if set */
 	jz slow_path
 	movl  %esp,%eax
-	call ipipe_fastcall_hook /* __IPIPE_SYSCALL_E is assumed */
+	call dovetail_fastcall_hook /* _DOVETAIL_SYSCALL_E is assumed */
 	testl  %eax,%eax
 	movl PT_EAX(%esp),%eax
 	jge sysenter_exit_sync
 	/* fastcall handler not implemented */
 	movl PT_ORIG_EAX(%esp),%eax
 slow_path:
-	testl $_TIP_NOTIFY,TI_ipipe(%ebp)
+	testl $_TLF_DOVETAIL,TI_status(%ebp)
 	jnz pipeline_sysenter
 	cmpl $(NR_syscalls),%eax
 	jb root_sysenter
 pipeline_sysenter:
 	movl  %esp,%eax
-	call __ipipe_notify_syscall
+	call dovetail_handle_syscall_slow
 	mov %eax,%ecx
 	movl PT_EAX(%esp),%eax
-	testl $_TIP_HEAD,TI_ipipe(%ebp)
+	testl $_TLF_HEAD,TI_status(%ebp)
 	jnz sysenter_exit_fast
 	testl %ecx,%ecx
 	jne sysenter_exit_check
 	movl PT_ORIG_EAX(%esp),%eax
 root_sysenter:
-#endif /* CONFIG_IPIPE */
+#endif /* CONFIG_DOVETAIL */
 	testl $_TIF_WORK_SYSCALL_ENTRY,TI_flags(%ebp)
 	jnz sysenter_audit
 sysenter_do_call:
@@ -504,20 +476,20 @@ sysenter_exit:
 	PTGS_TO_GS
 	ENABLE_INTERRUPTS_SYSEXIT
 
-#ifdef CONFIG_IPIPE
+#ifdef CONFIG_DOVETAIL
 sysenter_exit_sync:
-	testl $_TIP_HEAD,TI_ipipe(%ebp)
+	testl $_TLF_HEAD,TI_status(%ebp)
 	jz sysenter_exit_root
-	testl $_TIP_MAYDAY,TI_ipipe(%ebp)
+	testl $_TIF_MAYDAY,TI_flags(%ebp)
 	jz sysenter_exit_fast
 	movl  %esp,%eax
-	call __ipipe_call_mayday
+	call dovetail_call_mayday
 sysenter_exit_fast:
 	DISABLE_INTERRUPTS(CLBR_ANY)
 	TRACE_IRQS_OFF
 	jmp sysenter_exit
 sysenter_exit_root:
-	call __ipipe_root_sync
+	call dovetail_root_sync
 	movl PT_EAX(%esp),%eax
 	jmp sysenter_exit_check
 #endif
@@ -572,25 +544,25 @@ ENTRY(system_call)
 	pushl_cfi %eax			# save orig_eax
 	SAVE_ALL
 	GET_THREAD_INFO(%ebp)
-#ifdef CONFIG_IPIPE
+#ifdef CONFIG_DOVETAIL
 	/*
 	 * We currently don't implement fastcall support for
 	 * the legacy 0x80 syscall form.
 	 */
-	testl $_TIP_NOTIFY,TI_ipipe(%ebp)
+	testl $_TLF_DOVETAIL,TI_status(%ebp)
 	jnz pipeline_syscall
 	cmpl $(NR_syscalls),%eax
 	jb root_syscall
 pipeline_syscall:
 	movl  %esp,%eax
-	call __ipipe_notify_syscall
-	testl $_TIP_HEAD,TI_ipipe(%ebp)
+	call dovetail_handle_syscall_slow
+	testl $_TLF_HEAD,TI_status(%ebp)
 	jnz restore_nocheck
 	testl %eax,%eax
 	jnz syscall_exit
 	movl PT_ORIG_EAX(%esp),%eax
 root_syscall:
-#endif /* CONFIG_IPIPE */
+#endif /* CONFIG_DOVETAIL */
 					# system call tracing in operation / emulation
 	testl $_TIF_WORK_SYSCALL_ENTRY,TI_flags(%ebp)
 	jnz syscall_trace_entry
@@ -692,7 +664,7 @@ work_pending:
 	testb $_TIF_NEED_RESCHED, %cl
 	jz work_notifysig
 work_resched:
-	HARD_COND_ENABLE_INTERRUPTS
+	ENABLE_INTERRUPTS_IF_PIPELINED(CLBR_ANY)
 	call schedule
 	LOCKDEP_SYS_EXIT
 	DISABLE_INTERRUPTS(CLBR_ANY)	# make sure we don't miss an interrupt
@@ -708,7 +680,7 @@ work_resched:
 
 work_notifysig:				# deal with pending signals and
 					# notify-resume requests
-	HARD_COND_ENABLE_INTERRUPTS
+	ENABLE_INTERRUPTS_IF_PIPELINED(CLBR_ANY)
 #ifdef CONFIG_VM86
 	testl $X86_EFLAGS_VM, PT_EFLAGS(%esp)
 	movl %esp, %eax
@@ -842,7 +814,7 @@ END(irq_entries_start)
 
 .Lunwind_root_irq:
 	DISABLE_INTERRUPTS(CLBR_ANY)
-	ret	/* back to __ipipe_do_IRQ() */
+	ret	/* back to do_IRQ_pipelined() */
 
 ENTRY(do_root_irq)
 	pushfl
@@ -862,10 +834,8 @@ common_interrupt:
 	ASM_CLAC;			\
 	addl $-0x80,(%esp)	/* Adjust vector into the [-256,-1] range */
 	SAVE_ALL
-	IPIPE_TRACE_IRQ_ENTER
 	movl %esp, %eax
-	call __ipipe_handle_irq
-	IPIPE_TRACE_IRQ_EXIT
+	call enter_irq_pipeline
 	testl %eax,%eax
 	jnz  ret_from_intr
 	jmp restore_nocheck
@@ -880,10 +850,8 @@ ENTRY(name)				\
 	ASM_CLAC;			\
 	pushl_cfi $~(nr);		\
 	SAVE_ALL;			\
-	IPIPE_TRACE_IRQ_ENTER;		\
 	movl %esp, %eax;		\
-	call __ipipe_handle_irq;	\
-	IPIPE_TRACE_IRQ_EXIT;		\
+	call enter_irq_pipeline;	\
 	testl %eax,%eax;		\
 	jnz  ret_from_intr;		\
 	jmp restore_nocheck;		\
@@ -892,16 +860,12 @@ ENTRY(name)				\
 /*
  * We never call the handler directly, we have to go through the
  * pipeline instead, which sets the proper routing in
- * __ipipe_enable_pipeline(), so we may ignore the function arg.
+ * arch_irq_pipeline_init(), so we may ignore the function arg.
  */
 #define BUILD_INTERRUPT3(name, nr, fn)	\
 	BUILD_INTERRUPT2(name, nr)
 
 #ifdef CONFIG_X86_LOCAL_APIC
-	/*
-	 * The pipeline-specific vectors are not traced by the regular tracing
-	 * infrastructure (CONFIG_IPIPE_TRACE allows this though).
-	 */
 	BUILD_INTERRUPT2(ipipe_hrtimer_interrupt, IPIPE_HRTIMER_VECTOR)
 #ifdef CONFIG_SMP	
 	BUILD_INTERRUPT2(ipipe_reschedule_interrupt, IPIPE_RESCHEDULE_VECTOR)

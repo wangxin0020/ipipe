@@ -145,6 +145,51 @@ static inline bool test_and_clear_restore_sigmask(void)
 #error "no set_restore_sigmask() provided and default one won't work"
 #endif
 
+static inline void set_ti_local_flags(struct thread_info *ti, unsigned int mask)
+{
+	ti->local_flags |= mask;
+}
+
+static inline void set_thread_local_flags(unsigned int mask)
+{
+	set_ti_local_flags(current_thread_info(), mask);
+}
+
+static inline
+int test_and_set_ti_local_flags(struct thread_info *ti, unsigned int mask)
+{
+	int old = ti->local_flags & mask;
+	ti->local_flags |= mask;
+	return old != 0;
+}
+
+static inline int test_and_set_thread_local_flags(unsigned int mask)
+{
+	return test_and_set_ti_local_flags(current_thread_info(), mask);
+}
+
+static inline
+void clear_ti_local_flags(struct thread_info *ti, unsigned int mask)
+{
+	ti->local_flags &= ~mask;
+}
+
+static inline void clear_thread_local_flags(unsigned int mask)
+{
+	clear_ti_local_flags(current_thread_info(), mask);
+}
+
+static inline
+bool test_ti_local_flags(struct thread_info *ti, unsigned int mask)
+{
+	return (ti->local_flags & mask) != 0;
+}
+
+static inline bool test_thread_local_flags(unsigned int mask)
+{
+	return test_ti_local_flags(current_thread_info(), mask);
+}
+
 #endif	/* __KERNEL__ */
 
 #endif /* _LINUX_THREAD_INFO_H */

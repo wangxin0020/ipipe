@@ -49,12 +49,6 @@ struct pt_regs;
 struct irq_desc {
 	struct irq_data		irq_data;
 	unsigned int __percpu	*kstat_irqs;
-#ifdef CONFIG_IPIPE
-	void			(*ipipe_ack)(unsigned int irq,
-					     struct irq_desc *desc);
-	void			(*ipipe_end)(unsigned int irq,
-					     struct irq_desc *desc);
-#endif /* CONFIG_IPIPE */
 	irq_flow_handler_t	handle_irq;
 #ifdef CONFIG_IRQ_PREFLOW_FASTEOI
 	irq_preflow_handler_t	preflow_handler;
@@ -152,6 +146,9 @@ static inline int handle_domain_irq(struct irq_domain *domain,
 {
 	return __handle_domain_irq(domain, hwirq, true, regs);
 }
+
+int do_domain_irq(unsigned int irq, struct pt_regs *regs);
+
 #endif
 
 /* Test to see if a driver has successfully requested an irq */
@@ -161,10 +158,6 @@ static inline int irq_has_action(unsigned int irq)
 	return desc->action != NULL;
 }
 
-irq_flow_handler_t
-__fixup_irq_handler(struct irq_desc *desc, irq_flow_handler_t handle,
-		    int is_chained);
-
 /* caller has locked the irq_desc and both params are valid */
 static inline void __irq_set_handler_locked(unsigned int irq,
 					    irq_flow_handler_t handler)
@@ -172,7 +165,6 @@ static inline void __irq_set_handler_locked(unsigned int irq,
 	struct irq_desc *desc;
 
 	desc = irq_to_desc(irq);
-	handler = __fixup_irq_handler(desc, handler, 0);
 	desc->handle_irq = handler;
 }
 
@@ -203,6 +195,14 @@ static inline int irq_is_percpu(unsigned int irq)
 
 	desc = irq_to_desc(irq);
 	return desc->status_use_accessors & IRQ_PER_CPU;
+}
+
+static inline int irq_is_pipelined(unsigned int irq)
+{
+	struct irq_desc *desc;
+
+	desc = irq_to_desc(irq);
+	return desc->status_use_accessors & IRQ_PIPELINED;
 }
 
 static inline void

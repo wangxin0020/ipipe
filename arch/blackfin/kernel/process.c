@@ -55,7 +55,7 @@ void arch_cpu_idle(void)__attribute__((l1_text));
  */
 void arch_cpu_idle(void)
 {
-	__ipipe_idle();
+	local_irq_enable();
 	hard_local_irq_disable();
 	if (!need_resched())
 		idle_with_irq_disabled();

@@ -39,20 +39,20 @@ unsigned int cpu_last_asid = ASID_FIRST_VERSION;
 /*
  * We may create a new context over the head domain, which means that
  * we can't send IPIs using the regular smp_call* mechanism. Use the
- * pipelined VNMIs instead.
+ * pipeline locking mechanism instead.
  *
  * However, we must be able to serve interrupts while attempting to
  * grab the ASID lock on entry to __new_context(). This is a
- * prerequisite for broadcasting VNMIs to other CPUs later on, to have
- * them reset their current ASID, without risking deadlocks. I.e. each
- * CPU must be able to reset the current ASID upon a remote request,
- * while trying to get a new ASID.
+ * prerequisite for broadcasting lock IPIs to other CPUs later on, to
+ * have them reset their current ASID, without risking
+ * deadlocks. I.e. each CPU must be able to reset the current ASID
+ * upon a remote request, while trying to get a new ASID.
  *
  * So CONFIG_SMP+IPIPE requires CONFIG_IPIPE_WANT_PREEMPTIBLE_SWITCH.
  */
 #define asid_lock(__flags)							\
 	do {									\
-		IPIPE_WARN_ONCE(hard_irqs_disabled());				\
+		WARN_ON_ONCE(irq_pipeline_debug() && hard_irqs_disabled()); 	\
 		while (!raw_spin_trylock_irqsave(&cpu_asid_lock, (__flags)))	\
 			cpu_relax();						\
 	} while (0)								\
@@ -60,8 +60,12 @@ unsigned int cpu_last_asid = ASID_FIRST_VERSION;
 #define asid_unlock(__flags)	\
 	raw_spin_unlock_irqrestore(&cpu_asid_lock, __flags)
 
-#define asid_broadcast_reset()	\
-	__ipipe_send_vnmi(reset_context, *cpu_online_mask, NULL);
+static inline void asid_broadcast_reset(void)
+{
+	unsigned long flags;
+	flags = irq_pipeline_lock(reset_context, NULL);
+	irq_pipeline_unlock(flags);
+}
 
 #else /* !(CONFIG_SMP && CONFIG_IPIPE) */
 
@@ -120,7 +124,7 @@ static void set_mm_context(struct mm_struct *mm, unsigned int asid)
 	/*
 	 * Set the mm_cpumask(mm) bit for the current CPU.
 	 */
-	cpumask_set_cpu(ipipe_processor_id(), mm_cpumask(mm));
+	cpumask_set_cpu(raw_smp_processor_id(), mm_cpumask(mm));
 }
 
 /*
@@ -130,7 +134,7 @@ static void set_mm_context(struct mm_struct *mm, unsigned int asid)
 static void reset_context(void *info)
 {
 	unsigned int asid;
-	unsigned int cpu = ipipe_processor_id();
+	unsigned int cpu = raw_smp_processor_id();
 	struct mm_struct *mm = current->active_mm;
 
 	/*
@@ -156,7 +160,7 @@ static void reset_context(void *info)
 static inline void set_mm_context(struct mm_struct *mm, unsigned int asid)
 {
 	mm->context.id = asid;
-	cpumask_copy(mm_cpumask(mm), cpumask_of(ipipe_processor_id()));
+	cpumask_copy(mm_cpumask(mm), cpumask_of(raw_smp_processor_id()));
 }
 
 #endif
@@ -169,7 +173,7 @@ void __new_context(struct mm_struct *mm)
 	int cpu;
 
 	asid_lock(flags);
-	cpu = ipipe_processor_id();
+	cpu = raw_smp_processor_id();
 #ifdef CONFIG_SMP
 	/*
 	 * Check the ASID again, in case the change was broadcast from another

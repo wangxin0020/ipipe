@@ -17,7 +17,6 @@
 #include <linux/platform_device.h>
 #include <linux/syscore_ops.h>
 #include <linux/interrupt.h>
-#include <linux/ipipe.h>
 #include <linux/sched.h>
 #include <linux/bitops.h>
 #include <linux/fb.h>
@@ -131,7 +130,7 @@ static void lpd270_irq_handler(unsigned int irq, struct irq_desc *desc)
 		desc->irq_data.chip->irq_ack(&desc->irq_data);
 		if (likely(pending)) {
 			irq = LPD270_IRQ(0) + __ffs(pending);
-			ipipe_handle_demuxed_irq(irq);
+			generic_handle_irq(irq);
 
 			pending = __raw_readw(LPD270_INT_STATUS) &
 						lpd270_irq_enabled;

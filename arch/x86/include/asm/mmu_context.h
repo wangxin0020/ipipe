@@ -74,7 +74,7 @@ static inline void load_mm_ldt(struct mm_struct *mm)
 	else
 		clear_LDT();
 
-	DEBUG_LOCKS_WARN_ON(preemptible());
+	DEBUG_LOCKS_WARN_ON(preemptible() && !hard_irqs_disabled());
 }
 
 /*
@@ -97,9 +97,8 @@ static inline void __switch_mm(struct mm_struct *prev, struct mm_struct *next,
 {
 	unsigned cpu = smp_processor_id();
 
-#ifdef CONFIG_IPIPE_DEBUG_INTERNAL
-	WARN_ON_ONCE(!hard_irqs_disabled());
-#endif
+	WARN_ON_ONCE(dovetail_debug() && !hard_irqs_disabled());
+
 	if (likely(prev != next)) {
 #ifdef CONFIG_SMP
 		this_cpu_write(cpu_tlbstate.state, TLBSTATE_OK);

@@ -85,6 +85,7 @@ static struct irq_chip fsl_msi_chip = {
 	.irq_unmask	= pci_msi_unmask_irq,
 	.irq_ack	= fsl_msi_end_irq,
 	.irq_print_chip = fsl_msi_print_chip,
+	.flags		= IRQCHIP_PIPELINE_SAFE | IRQCHIP_PIPELINE_UNLOCKED,
 };
 
 static int fsl_msi_host_map(struct irq_domain *h, unsigned int virq,
@@ -316,7 +317,7 @@ static irqreturn_t fsl_msi_cascade(int irq, void *data)
 				msi_hwirq(msi_data, msir_index,
 					  intr_index + have_shift));
 		if (cascade_irq != NO_IRQ) {
-			ipipe_handle_demuxed_irq(cascade_irq);
+			generic_handle_irq(cascade_irq);
 			ret = IRQ_HANDLED;
 		}
 		have_shift += intr_index + 1;

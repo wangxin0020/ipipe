@@ -21,8 +21,7 @@
  * in the TPIDRPRW. TPIDRPRW only exists on V6K and V7
  */
 #if defined(CONFIG_SMP) && !defined(CONFIG_CPU_V6) && \
-	(!defined(CONFIG_IPIPE) ||					\
-		(!defined(CONFIG_SMP_ON_UP) && !defined(CONFIG_IPIPE_TRACE)))
+	(!defined(CONFIG_IPIPE) || !defined(CONFIG_SMP_ON_UP))
 static inline void set_my_cpu_offset(unsigned long off)
 {
 	/* Set TPIDRPRW */
@@ -46,7 +45,7 @@ static inline unsigned long __my_cpu_offset(void)
 #define __my_cpu_offset __my_cpu_offset()
 #else
 #if defined(CONFIG_SMP) && defined(CONFIG_IPIPE)
-#define __my_cpu_offset (per_cpu_offset(ipipe_processor_id()))
+#define __my_cpu_offset per_cpu_offset(raw_smp_processor_id())
 #endif /* SMP && IPIPE */
 
 #define set_my_cpu_offset(x)	do {} while(0)

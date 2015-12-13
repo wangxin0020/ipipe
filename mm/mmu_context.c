@@ -25,14 +25,14 @@ void use_mm(struct mm_struct *mm)
 
 	task_lock(tsk);
 	active_mm = tsk->active_mm;
- 	ipipe_mm_switch_protect(flags);
+ 	dovetail_switch_mm_enter(flags);
 	if (active_mm != mm) {
 		atomic_inc(&mm->mm_count);
 		tsk->active_mm = mm;
 	}
 	tsk->mm = mm;
 	__switch_mm(active_mm, mm, tsk);
- 	ipipe_mm_switch_unprotect(flags);
+ 	dovetail_switch_mm_exit(flags);
 	task_unlock(tsk);
 #ifdef finish_arch_post_lock_switch
 	finish_arch_post_lock_switch();

@@ -12,13 +12,13 @@ notrace static unsigned int check_preemption_disabled(const char *what1,
 {
 	int this_cpu = raw_smp_processor_id();
 
-	if (!ipipe_root_p)
+	if (hard_irqs_disabled() || !on_root_stage())
 		goto out;
 
 	if (likely(preempt_count()))
 		goto out;
 
-	if (irqs_disabled() || hard_irqs_disabled())
+	if (irqs_disabled())
 		goto out;
 
 	/*

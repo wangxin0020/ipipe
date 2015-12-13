@@ -9,10 +9,10 @@
 #include <linux/compiler.h>
 #include <linux/bitops.h>
 #include <linux/log2.h>
-#include <linux/ipipe_base.h>
 #include <linux/typecheck.h>
 #include <linux/printk.h>
 #include <linux/dynamic_debug.h>
+#include <asm-generic/irq_pipeline.h>
 #include <asm/byteorder.h>
 #include <uapi/linux/kernel.h>
 

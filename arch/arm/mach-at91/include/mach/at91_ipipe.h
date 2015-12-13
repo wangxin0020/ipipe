@@ -1,8 +1,6 @@
 #ifndef AT91_IPIPE_H
 #define AT91_IPIPE_H
 
-#include <linux/ipipe.h>
-
 #ifdef CONFIG_IPIPE
 void at91_pic_muter_register(void);
 #else /* !CONFIG_IPIPE */

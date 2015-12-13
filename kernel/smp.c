@@ -219,6 +219,9 @@ static void flush_smp_call_function_queue(bool warn_cpu_offline)
 	WARN_ON(!irqs_disabled());
 
 	head = this_cpu_ptr(&call_single_queue);
+	if (llist_empty(head))
+		return;
+
 	entry = llist_del_all(head);
 	entry = llist_reverse_order(entry);
 

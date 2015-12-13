@@ -14,7 +14,6 @@
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/irq.h>
-#include <linux/ipipe.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
@@ -54,7 +53,6 @@ struct pu_domain {
 static void __iomem *gpc_base;
 static u32 gpc_wake_irqs[IMR_NUM];
 static u32 gpc_saved_imrs[IMR_NUM];
-static IPIPE_DEFINE_RAW_SPINLOCK(gpc_lock);
 
 void imx_gpc_set_arm_power_up_timing(u32 sw2iso, u32 sw)
 {
@@ -180,49 +178,27 @@ void imx_gpc_hwirq_mask(unsigned int hwirq)
 
 static void imx_gpc_irq_unmask(struct irq_data *d)
 {
-	unsigned long flags;
-
-	raw_spin_lock_irqsave_cond(&gpc_lock, flags);
 	imx_gpc_hwirq_unmask(d->hwirq);
-	raw_spin_unlock(&gpc_lock);
 	irq_chip_unmask_parent(d);
-	/* Parent IC will handle virtual unlocking */
-	hard_cond_local_irq_restore(flags);
 }
 
 static void imx_gpc_irq_mask(struct irq_data *d)
 {
-	unsigned long flags;
-
-	raw_spin_lock_irqsave_cond(&gpc_lock, flags);
-	/* Parent IC will handle virtual locking */
 	imx_gpc_hwirq_mask(d->hwirq);
-	raw_spin_unlock(&gpc_lock);
 	irq_chip_mask_parent(d);
-	hard_cond_local_irq_restore(flags);
 }
 
-#ifdef CONFIG_IPIPE
-
-static void imx_gpc_hold_irq(struct irq_data *d)
+static void imx_gpc_irq_hold(struct irq_data *d)
 {
-	raw_spin_lock(&gpc_lock);
 	imx_gpc_hwirq_mask(d->hwirq);
-	raw_spin_unlock(&gpc_lock);
 	irq_chip_hold_parent(d);
 }
 
-static void imx_gpc_release_irq(struct irq_data *d)
+static void imx_gpc_irq_release(struct irq_data *d)
 {
-	unsigned long flags;
-
-	raw_spin_lock_irqsave(&gpc_lock, flags);
 	imx_gpc_hwirq_unmask(d->hwirq);
-	raw_spin_unlock_irqrestore(&gpc_lock, flags);
 	irq_chip_release_parent(d);
 }
-
-#endif /* CONFIG_IPIPE */
 
 static struct irq_chip imx_gpc_chip = {
 	.name			= "GPC",
@@ -234,10 +210,9 @@ static struct irq_chip imx_gpc_chip = {
 #ifdef CONFIG_SMP
 	.irq_set_affinity	= irq_chip_set_affinity_parent,
 #endif
-#ifdef CONFIG_IPIPE
-	.irq_hold		= imx_gpc_hold_irq,
-	.irq_release		= imx_gpc_release_irq,
-#endif
+	.irq_hold		= imx_gpc_irq_hold,
+	.irq_release		= imx_gpc_irq_release,
+	.flags			= IRQCHIP_PIPELINE_SAFE,
 };
 
 static int imx_gpc_domain_xlate(struct irq_domain *domain,

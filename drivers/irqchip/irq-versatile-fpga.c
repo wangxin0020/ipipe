@@ -79,7 +79,7 @@ static void fpga_irq_handle(unsigned int irq, struct irq_desc *desc)
 	do {
 		irq = ffs(status) - 1;
 		status &= ~(1 << irq);
-		ipipe_handle_demuxed_irq(irq_find_mapping(f->domain, irq));
+		generic_handle_irq(irq_find_mapping(f->domain, irq));
 	} while (status);
 }
 
@@ -96,7 +96,7 @@ static int handle_one_fpga(struct fpga_irq_data *f, struct pt_regs *regs)
 
 	while ((status  = readl(f->base + IRQ_STATUS))) {
 		irq = ffs(status) - 1;
-		ipipe_handle_domain_irq(f->domain, irq, regs);
+		handle_domain_irq(f->domain, irq, regs);
 		handled = 1;
 	}
 

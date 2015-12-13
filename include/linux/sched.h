@@ -26,7 +26,7 @@ struct sched_param {
 #include <linux/nodemask.h>
 #include <linux/mm_types.h>
 #include <linux/preempt_mask.h>
-#include <linux/ipipe.h>
+#include <linux/irqstage.h>
 
 #include <asm/page.h>
 #include <asm/ptrace.h>
@@ -214,17 +214,10 @@ print_cfs_rq(struct seq_file *m, int cpu, struct cfs_rq *cfs_rq);
 #define TASK_WAKEKILL		128
 #define TASK_WAKING		256
 #define TASK_PARKED		512
-#ifdef CONFIG_IPIPE
 #define TASK_HARDENING		1024
-#define TASK_NOWAKEUP		2048
+#define TASK_STALL		2048
 #define TASK_STATE_MAX		4096
 #define TASK_STATE_TO_CHAR_STR "RSDTtZXxKWPHN"
-#else  /* !CONFIG_IPIPE */
-#define TASK_HARDENING		0
-#define TASK_NOWAKEUP		0
-#define TASK_STATE_MAX		1024
-#define TASK_STATE_TO_CHAR_STR "RSDTtZXxKWP"
-#endif /* CONFIG_IPIPE */
 
 extern char ___assert_task_state[1 - 2*!!(
 		sizeof(TASK_STATE_TO_CHAR_STR)-1 != ilog2(TASK_STATE_MAX)+1)];
@@ -514,12 +507,11 @@ static inline int get_dumpable(struct mm_struct *mm)
 #define MMF_VM_MERGEABLE	16	/* KSM may merge identical pages */
 #define MMF_VM_HUGEPAGE		17	/* set when VM_HUGEPAGE is set on vma */
 #define MMF_EXE_FILE_CHANGED	18	/* see prctl_set_mm_exe_file() */
-#ifdef CONFIG_IPIPE
-#define MMF_VM_PINNED		31	/* ondemand load up and COW disabled */
-#endif
 
 #define MMF_HAS_UPROBES		19	/* has uprobes */
 #define MMF_RECALC_UPROBES	20	/* MMF_HAS_UPROBES can be wrong */
+
+#define MMF_VM_PINNED		31	/* ondemand load up and COW disabled */
 
 #define MMF_INIT_MASK		(MMF_DUMPABLE_MASK | MMF_DUMP_FILTER_MASK)
 
@@ -2739,7 +2731,8 @@ static inline unsigned long *end_of_stack(struct task_struct *p)
 }
 
 #endif
-#define task_stack_end_corrupted(task) \
+
+#define task_stack_end_corrupted(task)				\
 		(*(end_of_stack(task)) != STACK_END_MAGIC)
 
 static inline int object_is_on_stack(void *obj)

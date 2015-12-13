@@ -21,6 +21,7 @@
  * HARDIRQ_MASK:	0x000f0000
  *     NMI_MASK:	0x00100000
  * PREEMPT_ACTIVE:	0x00200000
+ * PIPELINE_MASK:	0x00400000
  */
 #define PREEMPT_BITS	8
 #define SOFTIRQ_BITS	8
@@ -49,6 +50,11 @@
 #define PREEMPT_ACTIVE_BITS	1
 #define PREEMPT_ACTIVE_SHIFT	(NMI_SHIFT + NMI_BITS)
 #define PREEMPT_ACTIVE	(__IRQ_MASK(PREEMPT_ACTIVE_BITS) << PREEMPT_ACTIVE_SHIFT)
+
+#define PIPELINE_BITS	1
+#define PIPELINE_SHIFT	(PREEMPT_ACTIVE_SHIFT + PREEMPT_ACTIVE_BITS)
+#define PIPELINE_MASK	(__IRQ_MASK(PIPELINE_BITS) << PIPELINE_SHIFT)
+#define PIPELINE_OFFSET	(1UL << PIPELINE_SHIFT)
 
 #define hardirq_count()	(preempt_count() & HARDIRQ_MASK)
 #define softirq_count()	(preempt_count() & SOFTIRQ_MASK)
@@ -121,5 +127,7 @@
 #else
 # define preemptible()	0
 #endif
+
+#define in_pipeline()	(preempt_count() & PIPELINE_MASK)
 
 #endif /* LINUX_PREEMPT_MASK_H */

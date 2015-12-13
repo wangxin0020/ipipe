@@ -8,7 +8,6 @@
 
 #include <linux/linkage.h>
 #include <linux/list.h>
-#include <linux/ipipe_base.h>
 
 /*
  * We use the MSB mostly because its available; see <linux/preempt_mask.h> for
@@ -126,27 +125,7 @@ do { \
 
 #endif /* CONFIG_PREEMPT_COUNT */
 
-#ifdef CONFIG_IPIPE
-#define hard_preempt_disable()				\
-	({						\
-		unsigned long __flags__;		\
-		__flags__ = hard_local_irq_save();	\
-		if (__ipipe_root_p)			\
-			preempt_disable();		\
-		__flags__;				\
-	})
-
-#define hard_preempt_enable(__flags__)			\
-	do {						\
-		if (__ipipe_root_p) {			\
-			preempt_enable_no_resched();	\
-			hard_local_irq_restore(__flags__);	\
-			preempt_check_resched();	\
-		} else					\
-			hard_local_irq_restore(__flags__);	\
-	} while (0)
-
-#elif defined(MODULE)
+#ifdef MODULE
 /*
  * Modules have no business playing preemption tricks.
  */
@@ -154,7 +133,7 @@ do { \
 #undef preempt_enable_no_resched
 #undef preempt_enable_no_resched_notrace
 #undef preempt_check_resched
-#endif	/* !IPIPE && MODULE */
+#endif
 
 #define preempt_set_need_resched() \
 do { \
@@ -212,6 +191,22 @@ static inline void preempt_notifier_init(struct preempt_notifier *notifier,
 	notifier->ops = ops;
 }
 
+#endif
+
+#ifdef CONFIG_IPIPE
+unsigned long hard_preempt_disable(void);
+void hard_preempt_enable(unsigned long flags);
+#else
+#define hard_preempt_disable()		\
+({					\
+	preempt_disable();		\
+	0;				\
+})
+#define hard_preempt_enable(__flags)	\
+	do {				\
+		preempt_enable();	\
+		(void)(__flags);	\
+	} while (0)
 #endif
 
 #endif /* __LINUX_PREEMPT_H */

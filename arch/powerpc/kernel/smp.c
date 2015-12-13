@@ -138,7 +138,11 @@ int smp_generic_kick_cpu(int nr)
 
 static irqreturn_t call_function_action(int irq, void *data)
 {
-	generic_smp_call_function_interrupt();
+	if (!on_root_stage())
+		smp_ipi_pipeline_demux(irq);
+	else
+		generic_smp_call_function_interrupt();
+
 	return IRQ_HANDLED;
 }
 
@@ -179,24 +183,26 @@ const char *smp_ipi_name[] = {
 	[PPC_MSG_CALL_FUNCTION] =  "ipi call function",
 	[PPC_MSG_RESCHEDULE] = "ipi reschedule",
 	[PPC_MSG_TICK_BROADCAST] = "ipi tick-broadcast",
-	[PPC_MSG_DEBUGGER_BREAK] = "ipi I-pipe/debugger",
+	[PPC_MSG_DEBUGGER_BREAK] = "ipi debugger",
 };
 
 /* optional function to request ipi, for controllers with >= 4 ipis */
 int smp_request_message_ipi(int virq, int msg)
 {
-	int err;
+	int err, flags;
 
 	if (msg < 0 || msg > PPC_MSG_DEBUGGER_BREAK) {
 		return -EINVAL;
 	}
-#ifdef CONFIG_IPIPE
-	if (msg == PPC_MSG_DEBUGGER_BREAK)
-		/* Piggyback the debugger IPI for the I-pipe. */
-		__ipipe_register_ipi(virq);
+#if !defined(CONFIG_DEBUGGER) && !defined(CONFIG_KEXEC)
+	if (msg == PPC_MSG_DEBUGGER_BREAK) {
+		return 1;
+	}
 #endif
-	err = request_irq(virq, smp_ipi_action[msg],
-			  IRQF_PERCPU | IRQF_NO_THREAD | IRQF_NO_SUSPEND,
+	flags = IRQF_PERCPU | IRQF_NO_THREAD | IRQF_NO_SUSPEND;
+	if (irqs_pipelined() && msg == PPC_MSG_CALL_FUNCTION)
+		flags |= IRQF_PIPELINED;
+	err = request_irq(virq, smp_ipi_action[msg], flags,
 			  smp_ipi_name[msg], NULL);
 	WARN(err < 0, "unable to request_irq %d for %s (rc %d)\n",
 		virq, smp_ipi_name[msg], err);
@@ -314,12 +320,8 @@ void smp_send_debugger_break(void)
 		return;
 
 	for_each_online_cpu(cpu)
-		if (cpu != me) {
-#ifdef CONFIG_IPIPE
-			cpu_set(cpu, __ipipe_dbrk_pending);
-#endif
+		if (cpu != me)
 			do_message_pass(cpu, PPC_MSG_DEBUGGER_BREAK);
-		}
 }
 #endif
 
@@ -685,7 +687,7 @@ void start_secondary(void *unused)
 	int i, base;
 
 #if defined(CONFIG_IPIPE) && defined(CONFIG_PPC64)
-	local_paca->ipipe_statp = (u64)&ipipe_percpu_context(&ipipe_root, cpu)->status;
+	local_paca->ipipe_statp = (u64)&irq_stage_context(&root_irq_stage, cpu)->status;
 #endif
 	atomic_inc(&init_mm.mm_count);
 	current->active_mm = &init_mm;

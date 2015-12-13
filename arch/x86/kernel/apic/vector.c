@@ -286,14 +286,16 @@ static void __setup_vector_irq(int cpu)
 		vector = cfg->vector;
 		per_cpu(vector_irq, cpu)[vector] = irq;
 	}
+
 #ifdef CONFIG_IPIPE
 	per_cpu(vector_irq, cpu)[IRQ_MOVE_CLEANUP_VECTOR] =
 		IRQ_MOVE_CLEANUP_VECTOR;
 	for (vector = first_system_vector; vector < NR_VECTORS; ++vector)
 		if (test_bit(vector, used_vectors))
 			per_cpu(vector_irq, cpu)[vector] =
-				ipipe_apic_vector_irq(vector);
+				apicm_vector_irq(vector);
 #endif
+
 	/* Mark the free vectors */
 	for (vector = 0; vector < NR_VECTORS; ++vector) {
 		/* I-pipe requires initialized vector_irq for system vectors */
@@ -347,10 +349,10 @@ int apic_retrigger_irq(struct irq_data *data)
 
 void apic_ack_edge(struct irq_data *data)
 {
-#ifndef CONFIG_IPIPE	
-	irq_complete_move(irqd_cfg(data));
-	irq_move_irq(data);
-#endif /* !CONFIG_IPIPE */
+	if (!irqs_pipelined()) {
+		irq_complete_move(irqd_cfg(data));
+		irq_move_irq(data);
+	}
 	__ack_APIC_irq();
 }
 

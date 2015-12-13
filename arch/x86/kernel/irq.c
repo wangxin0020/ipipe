@@ -179,6 +179,18 @@ u64 arch_irq_stat(void)
 }
 
 
+static inline void __ipipe_move_root_irq(unsigned int irq)
+{
+#ifdef CONFIG_SMP
+	if (irqs_pipelined() && irq < NR_IRQS) {
+		struct irq_data *data = irq_get_irq_data(irq);
+		struct irq_chip *chip = irq_data_get_irq_chip(data);
+		if (chip->irq_move)
+			chip->irq_move(data);
+	}
+#endif
+}
+
 /*
  * do_IRQ handles all normal device IRQ's (the special
  * SMP cross-CPU interrupts have their own specific

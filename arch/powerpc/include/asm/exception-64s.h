@@ -624,13 +624,14 @@ label##_common:							\
 #ifdef CONFIG_IPIPE
 /*
  * No NAP mode when pipelining, we don't want that extra latency.
- * Runlatch will be considered later in __ipipe_exit_irq().
+ * Runlatch will be considered later when leaving the primary IRQ
+ * handler.
  */
 #define STD_EXCEPTION_COMMON_ASYNC(trap, label, hdlr)		\
-	EXCEPTION_COMMON(trap, label, __ipipe_grab_irq,	\
+   EXCEPTION_COMMON(trap, label, irq_,enter_pipeline,		\
 			 __ipipe_ret_from_except_lite, HARD_DISABLE_INTS)
 #define DECREMENTER_EXCEPTION(trap, label, hdlr)		  \
-	EXCEPTION_COMMON(trap, label, __ipipe_grab_timer,	  \
+	EXCEPTION_COMMON(trap, label, timer_enter_pipeline,	  \
 			 __ipipe_ret_from_except_lite, HARD_DISABLE_INTS)
 #else
 #define STD_EXCEPTION_COMMON_ASYNC(trap, label, hdlr)		  \

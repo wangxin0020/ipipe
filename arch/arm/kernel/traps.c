@@ -25,7 +25,6 @@
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/sched.h>
-#include <linux/ipipe.h>
 #include <linux/irq.h>
 
 #include <linux/atomic.h>
@@ -495,13 +494,8 @@ asmlinkage void __exception_irq_entry handle_fiq_as_nmi(struct pt_regs *regs)
  */
 asmlinkage void bad_mode(struct pt_regs *regs, int reason)
 {
-	if (__ipipe_report_trap(IPIPE_TRAP_UNKNOWN,regs))
+	if (dovetail_trap(IPIPE_TRAP_UNKNOWN, regs))
 		return;
-
-#ifdef CONFIG_IPIPE
-	ipipe_stall_root();
-	hard_local_irq_enable();
-#endif
 
 	console_verbose();
 
@@ -510,11 +504,6 @@ asmlinkage void bad_mode(struct pt_regs *regs, int reason)
 	die("Oops - bad mode", regs, 0);
 	local_irq_disable();
 	panic("bad mode");
-
-#ifdef CONFIG_IPIPE
-	hard_local_irq_disable();
-	__ipipe_root_status &= ~IPIPE_STALL_FLAG;
-#endif
 }
 
 static int bad_syscall(int n, struct pt_regs *regs)

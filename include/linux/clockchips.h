@@ -14,6 +14,7 @@
 # include <linux/cpumask.h>
 # include <linux/ktime.h>
 # include <linux/notifier.h>
+# include <linux/irq_pipeline.h>
 
 struct clock_event_device;
 struct module;
@@ -72,6 +73,11 @@ enum clock_event_state {
  */
 # define CLOCK_EVT_FEAT_HRTIMER		0x000080
 
+/*
+ * Clockevent device can work with pipelined timer events.
+ */
+# define CLOCK_EVT_FEAT_PIPELINE	0x000100
+
 /**
  * struct clock_event_device - clock event device descriptor
  * @event_handler:	Assigned by the framework to be called by the low
@@ -97,7 +103,7 @@ enum clock_event_state {
  * @max_delta_ticks:	maximum delta value in ticks stored for reconfiguration
  * @name:		ptr to clock event name
  * @rating:		variable to rate clock event devices
- * @irq:		IRQ number (only for non CPU local devices)
+ * @irq:		IRQ number (only for non CPU local devices, or pipelined timers)
  * @bound_on:		Bound on CPU
  * @cpumask:		cpumask to indicate for which CPUs this device works
  * @list:		list head for the management code
@@ -142,15 +148,6 @@ struct clock_event_device {
 	const struct cpumask	*cpumask;
 	struct list_head	list;
 	struct module		*owner;
-
-#ifdef CONFIG_IPIPE
-	struct ipipe_timer      *ipipe_timer;
-	unsigned                ipipe_stolen;
-
-#define clockevent_ipipe_stolen(evt) ((evt)->ipipe_stolen)
-#else
-#define clockevent_ipipe_stolen(evt) (0)
-#endif /* !CONFIG_IPIPE */
 } ____cacheline_aligned;
 
 /*
@@ -183,6 +180,8 @@ extern void clockevents_config(struct clock_event_device *dev, u32 freq);
 extern void clockevents_config_and_register(struct clock_event_device *dev,
 					    u32 freq, unsigned long min_delta,
 					    unsigned long max_delta);
+extern void clockevents_set_state(struct clock_event_device *dev,
+				  enum clock_event_state state);
 
 extern int clockevents_update_freq(struct clock_event_device *ce, u32 freq);
 
@@ -213,6 +212,17 @@ static inline void tick_setup_hrtimer_broadcast(void) { }
 # endif
 
 extern int clockevents_notify(unsigned long reason, void *arg);
+
+#ifdef CONFIG_IRQ_PIPELINE
+struct clock_event_device *clockevents_get_device(int cpu);
+void clockevents_handle_event(struct clock_event_device *ced);
+#else
+static inline
+void clockevents_handle_event(struct clock_event_device *ced)
+{
+	ced->event_handler(ced);
+}
+#endif	/* !CONFIG_IRQ_PIPELINE */
 
 #else /* !CONFIG_GENERIC_CLOCKEVENTS: */
 

@@ -1565,9 +1565,7 @@ void scheduler_ipi(void)
 	 * however a fair share of IPIs are still resched only so this would
 	 * somewhat pessimize the simple resched case.
 	 */
-#ifndef IPIPE_ARCH_HAVE_VIRQ_IPI
 	irq_enter();
-#endif
 	sched_ttwu_pending();
 
 	/*
@@ -1577,9 +1575,7 @@ void scheduler_ipi(void)
 		this_rq()->idle_balance = 1;
 		raise_softirq_irqoff(SCHED_SOFTIRQ);
 	}
-#ifndef IPIPE_ARCH_HAVE_VIRQ_IPI
 	irq_exit();
-#endif
 }
 
 static void ttwu_queue_remote(struct task_struct *p, int cpu)
@@ -1671,7 +1667,7 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	smp_mb__before_spinlock();
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
 	if (!(p->state & state) ||
-	    (p->state & (TASK_NOWAKEUP|TASK_HARDENING)))
+	    (dovetailing() && (p->state & (TASK_STALL|TASK_HARDENING))))
 		goto out;
 
 	success = 1; /* we're going to change ->state */
@@ -2288,7 +2284,7 @@ asmlinkage __visible void schedule_tail(struct task_struct *prev)
 {
 	struct rq *rq;
 
-	__ipipe_complete_domain_migration();
+	dovetail_complete_domain_migration();
 
 	/* finish_task_switch() drops rq->lock and enables preemtion */
 	preempt_disable();
@@ -2344,7 +2340,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	switch_to(prev, next, prev);
 	barrier();
 
-	if (unlikely(__ipipe_switch_tail()))
+	if (unlikely(dovetail_context_switch_tail()))
 		return NULL;
 
 	return finish_task_switch(prev);
@@ -2761,7 +2757,7 @@ static int __sched __schedule(void)
 	rcu_note_context_switch();
 	prev = rq->curr;
 
- 	if (unlikely(prev->state & TASK_HARDENING))
+ 	if (unlikely(dovetailing() && (prev->state & TASK_HARDENING)))
 		/* Pop one disable level -- one still remains. */
 		preempt_enable();
 
@@ -2818,11 +2814,12 @@ static int __sched __schedule(void)
 		++*switch_count;
 
 		rq = context_switch(rq, prev, next); /* unlocks the rq */
-  		if (rq == NULL)
-			return 1; /* task hijacked by head domain */
+  		if (dovetailing() && rq == NULL)
+			return 1; /* task moved to the head domain */
 		cpu = cpu_of(rq);
 	} else {
-		prev->state &= ~TASK_HARDENING;
+		if (dovetailing())
+			prev->state &= ~TASK_HARDENING;
 		raw_spin_unlock_irq(&rq->lock);
 	}
 
@@ -2916,7 +2913,7 @@ asmlinkage __visible void __sched notrace preempt_schedule(void)
 	 * If there is a non-zero preempt_count or interrupts are disabled,
 	 * we do not want to preempt the current task. Just return..
 	 */
-	if (likely(!preemptible() || !ipipe_root_p))
+	if (likely(!on_root_stage() || !preemptible()))
 		return;
 
 	preempt_schedule_common();
@@ -2966,6 +2963,26 @@ EXPORT_SYMBOL_GPL(preempt_schedule_context);
 
 #endif /* CONFIG_PREEMPT */
 
+#ifdef CONFIG_IRQ_PIPELINE
+static inline void sync_root_stage(unsigned long flags)
+{
+	struct irq_stage_data *p;
+
+	hard_local_irq_disable();
+	p = irq_root_this_context();
+	if (unlikely(irq_staged_waiting(p))) {
+		__preempt_count_add(PREEMPT_ACTIVE);
+		trace_hardirqs_on();
+		__clear_bit(IPIPE_STALL_FLAG, &p->status);
+		irq_stage_sync_current();
+		__preempt_count_sub(PREEMPT_ACTIVE);
+	}
+	__root_irq_restore_nosync(flags);
+}
+#else
+static inline void sync_root_stage(unsigned long flags) { }
+#endif
+
 /*
  * this is the entry point to schedule() from kernel preemption
  * off of irq context.
@@ -2975,6 +2992,13 @@ EXPORT_SYMBOL_GPL(preempt_schedule_context);
 asmlinkage __visible void __sched preempt_schedule_irq(void)
 {
 	enum ctx_state prev_state;
+	unsigned long flags;
+
+	if (irqs_pipelined()) {
+		BUG_ON(!hard_irqs_disabled());
+		local_irq_save(flags);
+		hard_local_irq_enable();
+	}
 
 	/* Catch callers which need to be fixed */
 	BUG_ON(preempt_count() || !irqs_disabled());
@@ -2996,6 +3020,12 @@ asmlinkage __visible void __sched preempt_schedule_irq(void)
 	} while (need_resched());
 
 	exception_exit(prev_state);
+
+	/*
+	 * If pipelining interrupts, flush any pending IRQ that might
+	 * have been logged since we stalled the root stage on entry.
+	 */
+	sync_root_stage(flags);
 }
 
 int default_wake_function(wait_queue_t *curr, unsigned mode, int wake_flags,
@@ -3645,7 +3675,7 @@ change:
 
 	prev_class = p->sched_class;
 	__setscheduler(rq, p, attr, true);
-  	__ipipe_report_setsched(p);
+  	dovetail_change_task_scheduler(p);
 
 	if (running)
 		p->sched_class->set_curr_task(rq);
@@ -4830,12 +4860,12 @@ int set_cpus_allowed_ptr(struct task_struct *p, const struct cpumask *new_mask)
 
 	/* Can the task run on the task's current CPU? If so, we're done */
 	if (cpumask_test_cpu(task_cpu(p), new_mask)) {
-		__ipipe_report_setaffinity(p, task_cpu(p));
+		dovetail_change_task_affinity(p, task_cpu(p));
 		goto out;
 	}
 
 	dest_cpu = cpumask_any_and(cpu_active_mask, new_mask);
-	__ipipe_report_setaffinity(p, dest_cpu);
+	dovetail_change_task_affinity(p, dest_cpu);
 	if (task_running(rq, p) || p->state == TASK_WAKING) {
 		struct migration_arg arg = { p, dest_cpu };
 		/* Need help from migration thread: drop lock and wait. */
@@ -8422,17 +8452,18 @@ void dump_cpu_task(int cpu)
 	sched_show_task(cpu_curr(cpu));
 }
 
-#ifdef CONFIG_IPIPE
+#ifdef CONFIG_DOVETAIL
 
-int __ipipe_migrate_head(void)
+int dovetail_enter_head(void)
 {
 	struct task_struct *p = current;
 
 	preempt_disable();
 
-	IPIPE_WARN_ONCE(__this_cpu_read(ipipe_percpu.task_hijacked) != NULL);
+	WARN_ON_ONCE(dovetail_debug() &&
+		     __this_cpu_read(irq_pipeline.task_hijacked) != NULL);
 
-	__this_cpu_write(ipipe_percpu.task_hijacked, p);
+	__this_cpu_write(irq_pipeline.task_hijacked, p);
 	set_current_state(TASK_INTERRUPTIBLE | TASK_HARDENING);
 	sched_submit_work(p);
 	if (likely(__schedule()))
@@ -8443,20 +8474,20 @@ int __ipipe_migrate_head(void)
 
 	BUG();
 }
-EXPORT_SYMBOL_GPL(__ipipe_migrate_head);
+EXPORT_SYMBOL_GPL(dovetail_enter_head);
 
-void __ipipe_reenter_root(void)
+void dovetail_leave_head(void)
 {
-	struct rq *rq;
 	struct task_struct *p;
+	struct rq *rq;
 
-	p = __this_cpu_read(ipipe_percpu.rqlock_owner);
+	p = __this_cpu_read(irq_pipeline.rqlock_owner);
 	BUG_ON(p == NULL);
-	ipipe_clear_thread_flag(TIP_HEAD);
+	clear_thread_local_flags(_TLF_HEAD);
 	rq = finish_task_switch(p);
 	post_schedule(rq);
 	sched_preempt_enable_no_resched();
 }
-EXPORT_SYMBOL_GPL(__ipipe_reenter_root);
+EXPORT_SYMBOL_GPL(dovetail_leave_head);
 
-#endif /* CONFIG_IPIPE */
+#endif /* CONFIG_DOVETAIL */

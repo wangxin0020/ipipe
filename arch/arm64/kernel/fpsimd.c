@@ -23,6 +23,7 @@
 #include <linux/sched.h>
 #include <linux/signal.h>
 #include <linux/hardirq.h>
+#include <linux/dovetail.h>
 
 #include <asm/fpsimd.h>
 #include <asm/cputype.h>
@@ -93,7 +94,7 @@ static DEFINE_PER_CPU(struct fpsimd_state *, fpsimd_last_state);
  */
 void do_fpsimd_acc(unsigned int esr, struct pt_regs *regs)
 {
-	if (__ipipe_report_trap(IPIPE_TRAP_FPU_ACC, regs))
+	if (dovetail_trap(IPIPE_TRAP_FPU_ACC, regs))
 		return;
 
 	/* TODO: implement lazy context saving/restoring */
@@ -108,7 +109,7 @@ void do_fpsimd_exc(unsigned int esr, struct pt_regs *regs)
 	siginfo_t info;
 	unsigned int si_code = 0;
 
-	if (__ipipe_report_trap(IPIPE_TRAP_FPU_EXC, regs))
+	if (dovetail_trap(IPIPE_TRAP_FPU_EXC, regs))
 		return;
 
 	if (esr & FPEXC_IOF)

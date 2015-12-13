@@ -22,7 +22,6 @@
 #include <linux/of_address.h>
 #include <linux/time.h>
 #include <linux/irq.h>
-#include <linux/ipipe.h>
 #include <linux/ipipe_tickdev.h>
 #include <asm/mach/time.h>
 #include "generic.h"

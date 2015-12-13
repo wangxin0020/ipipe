@@ -125,7 +125,8 @@ config PPC
 	select GENERIC_IRQ_SHOW
 	select GENERIC_IRQ_SHOW_LEVEL
 	select IRQ_FORCED_THREADING
-	select IPIPE_HAVE_HOSTRT if IPIPE
+	select HAVE_IPIPE
+	select DOVETAIL_HAVE_HOSTRT if DOVETAIL
 	select HAVE_RCU_TABLE_FREE if SMP
 	select HAVE_SYSCALL_TRACEPOINTS
 	select HAVE_BPF_JIT
@@ -303,6 +304,11 @@ config PGTABLE_LEVELS
 	default 3 if PPC_64K_PAGES
 	default 4
 
+config IPIPE_HAVE_PREEMPTIBLE_SWITCH
+       bool
+       depends on IPIPE
+       default y
+
 source "init/Kconfig"
 
 source "kernel/Kconfig.freezer"
@@ -312,19 +318,13 @@ source "arch/powerpc/platforms/Kconfig"
 
 menu "Kernel options"
 
-source "kernel/ipipe/Kconfig"
-
-config IPIPE_HAVE_PREEMPTIBLE_SWITCH
-       bool
-       depends on IPIPE
-       default y
-
 config HIGHMEM
 	bool "High memory support"
 	depends on PPC32
 
 source kernel/Kconfig.hz
 source kernel/Kconfig.preempt
+source kernel/Kconfig.dovetail
 source "fs/Kconfig.binfmt"
 
 config HUGETLB_PAGE_SIZE_VARIABLE

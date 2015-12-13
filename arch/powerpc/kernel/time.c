@@ -54,7 +54,6 @@
 #include <linux/irq.h>
 #include <linux/delay.h>
 #include <linux/irq_work.h>
-#include <linux/ipipe_tickdev.h>
 #include <linux/clk-provider.h>
 #include <asm/trace.h>
 
@@ -109,15 +108,13 @@ struct clock_event_device decrementer_clockevent = {
 	.irq            = 0,
 	.set_next_event = decrementer_set_next_event,
 	.set_mode       = decrementer_set_mode,
-	.features       = CLOCK_EVT_FEAT_ONESHOT | CLOCK_EVT_FEAT_C3STOP,
+	.features       = CLOCK_EVT_FEAT_ONESHOT | CLOCK_EVT_FEAT_C3STOP | \
+				CLOCK_EVT_FEAT_PIPELINE,
 };
 EXPORT_SYMBOL(decrementer_clockevent);
 
 DEFINE_PER_CPU(u64, decrementers_next_tb);
 static DEFINE_PER_CPU(struct clock_event_device, decrementers);
-#ifdef CONFIG_IPIPE
-static DEFINE_PER_CPU(struct ipipe_timer, itimers);
-#endif /* CONFIG_IPIPE */
 
 #define XSEC_PER_SEC (1024*1024)
 
@@ -484,7 +481,7 @@ void arch_irq_work_raise(void)
 
 #endif /* CONFIG_IRQ_WORK */
 
-static void __timer_interrupt(void)
+void __timer_interrupt(void)
 {
 	struct pt_regs *regs = get_irq_regs();
 	u64 *next_tb = this_cpu_ptr(&decrementers_next_tb);
@@ -499,7 +496,7 @@ static void __timer_interrupt(void)
 	}
 
 	now = get_tb_or_rtc();
-	if (clockevent_ipipe_stolen(evt) || now >= *next_tb) {
+	if (irqs_pipelined() || now >= *next_tb) {
 		*next_tb = ~(u64)0;
 		if (evt->event_handler)
 			evt->event_handler(evt);
@@ -529,20 +526,21 @@ static void __timer_interrupt(void)
  * timer_interrupt - gets called when the decrementer overflows,
  * with interrupts disabled.
  */
-void timer_interrupt(struct pt_regs * regs)
+int timer_interrupt(struct pt_regs * regs)
 {
 	struct pt_regs *old_regs;
-	u64 *next_tb = this_cpu_ptr(&decrementers_next_tb);
-#ifdef CONFIG_IPIPE
-	struct clock_event_device *evt = this_cpu_ptr(&decrementers);
-#endif
+	u64 *next_tb;
 
 	/* Ensure a positive value is written to the decrementer, or else
 	 * some CPUs will continue to take decrementer exceptions.
 	 */
-	if (!clockevent_ipipe_stolen(evt))
-		set_dec(DECREMENTER_MAX);
+	set_dec(DECREMENTER_MAX);
 
+	if (irqs_pipelined())
+		return timer_enter_pipeline(regs);
+
+	next_tb = this_cpu_ptr(&decrementers_next_tb);
+	
 	/* Some implementations of hotplug will get timer interrupts while
 	 * offline, just ignore these and we also need to set
 	 * decrementers_next_tb as MAX to make sure __check_irq_replay
@@ -551,7 +549,7 @@ void timer_interrupt(struct pt_regs * regs)
 	 */
 	if (!cpu_online(smp_processor_id())) {
 		*next_tb = ~(u64)0;
-		return;
+		return 1;
 	}
 
 	/* Conditionally hard-enable interrupts now that the DEC has been
@@ -566,19 +564,13 @@ void timer_interrupt(struct pt_regs * regs)
 #endif
 
 	old_regs = set_irq_regs(regs);
-#ifndef CONFIG_IPIPE
-	/*
-	 * The timer interrupt is a virtual one when the I-pipe is
-	 * active, therefore we already called irq_enter() for it (see
-	 * __ipipe_run_isr).
-	 */
 	irq_enter();
-#endif
+
 	__timer_interrupt();
-#ifndef CONFIG_IPIPE
 	irq_exit();
-#endif
 	set_irq_regs(old_regs);
+
+	return 1;
 }
 
 /*
@@ -589,6 +581,28 @@ void timer_interrupt(struct pt_regs * regs)
 void hdec_interrupt(struct pt_regs *regs)
 {
 }
+
+#ifdef CONFIG_IRQ_PIPELINE
+/*
+ * Interrupt pipelining requires the ability to defer timer event
+ * handling for the kernel until the root stage is unstalled.  For
+ * this we need to keep such events pending in a log, indexed on IRQ
+ * number. Therefore we map the decrementer trap to a (pseudo) IRQ
+ * event obtained from our synthetic IRQ domain.
+ */
+static irqreturn_t decrementer_hp_handler(int virq, void *dev_id)
+{
+	clockevents_handle_event(this_cpu_ptr(&decrementers));
+
+	return IRQ_HANDLED;
+}
+
+static struct irqaction hp_timer_action = {
+	.handler = decrementer_hp_handler,
+	.name = "High-precision decrementer interrupt",
+	.flags = IRQF_TIMER,
+};
+#endif
 
 #ifdef CONFIG_SUSPEND
 static void generic_suspend_disable_irqs(void)
@@ -806,7 +820,7 @@ static inline void update_hostrt(struct timespec *wall_time, struct timespec *wt
 	/*
 	 * This is a temporary work-around until powerpc implements
 	 * the latest update_vsyscall() interface. We only fill in the
-	 * timekeeper fields ipipe_update_hostrt() currently uses.
+	 * timekeeper fields dovetail_update_hostrt() currently uses.
 	 */
 	struct timekeeper tk = {
 		.tkr_mono = {
@@ -819,7 +833,7 @@ static inline void update_hostrt(struct timespec *wall_time, struct timespec *wt
 		.wall_to_monotonic = timespec_to_timespec64(*wtm),
 	};
 
-	ipipe_update_hostrt(&tk);
+	dovetail_update_hostrt(&tk);
 }
 
 #endif
@@ -899,6 +913,11 @@ static void __init clocksource_init(void)
 static int decrementer_set_next_event(unsigned long evt,
 				      struct clock_event_device *dev)
 {
+	if (on_head_stage()) {
+		set_dec(evt);
+		return 0;
+	}
+
 	__this_cpu_write(decrementers_next_tb, get_tb_or_rtc() + evt);
 	set_dec(evt);
 
@@ -916,22 +935,6 @@ static void decrementer_set_mode(enum clock_event_mode mode,
 		decrementer_set_next_event(DECREMENTER_MAX, dev);
 }
 
-#ifdef CONFIG_IPIPE
-static int itimer_set(unsigned long evt, void *timer)
-{
-#ifndef CONFIG_40x
-	/*
-	 * Decrementer must be set to a positive 32bit value,
-	 * otherwise it would flood us with exceptions.
-	 */
-	if (evt > DECREMENTER_MAX)
-		evt = DECREMENTER_MAX;
-#endif /* CONFIG_40x */
-	set_dec((int)evt);
-	return 0;
-}
-#endif /* CONFIG_IPIPE */
-
 /* Interrupt handler for the timer broadcast IPI */
 void tick_broadcast_ipi_handler(void)
 {
@@ -947,16 +950,10 @@ static void register_decrementer_clockevent(int cpu)
 
 	*dec = decrementer_clockevent;
 	dec->cpumask = cpumask_of(cpu);
+	dec->irq = DECREMENTER_IRQ;
 
 	printk_once(KERN_DEBUG "clockevent: %s mult[%x] shift[%d] cpu[%d]\n",
 		    dec->name, dec->mult, dec->shift, cpu);
-
-#ifdef CONFIG_IPIPE
-	dec->ipipe_timer = &per_cpu(itimers, cpu);
-	dec->ipipe_timer->irq = IPIPE_TIMER_VIRQ;
-	dec->ipipe_timer->set = itimer_set;
-	dec->ipipe_timer->min_delay_ticks = 3;
-#endif /* CONFIG_IPIPE */
 
 	clockevents_register_device(dec);
 }
@@ -973,6 +970,10 @@ static void __init init_decrementer_clockevent(void)
 		clockevent_delta2ns(2, &decrementer_clockevent);
 
 	register_decrementer_clockevent(cpu);
+
+#ifdef CONFIG_IRQ_PIPELINE
+	setup_irq(DECREMENTER_IRQ, &hp_timer_action);
+#endif
 }
 
 void secondary_cpu_time_init(void)

@@ -27,7 +27,6 @@
 #include <linux/gpio.h>
 #include <linux/bitops.h>
 #include <linux/platform_data/gpio-omap.h>
-#include <linux/ipipe.h>
 
 #define OFF_MODE	1
 
@@ -731,9 +730,8 @@ static void omap_gpio_irq_handler(unsigned int irq, struct irq_desc *desc)
 	bank = container_of(chip, struct gpio_bank, chip);
 	isr_reg = bank->base + bank->regs->irqstatus;
 
-#ifndef CONFIG_IPIPE
-	pm_runtime_get_sync(bank->dev);
-#endif
+	if (!irqs_pipelined())
+		pm_runtime_get_sync(bank->dev);
 
 	if (WARN_ON(!isr_reg))
 		goto exit;
@@ -779,7 +777,7 @@ static void omap_gpio_irq_handler(unsigned int irq, struct irq_desc *desc)
 			if (bank->toggle_mask & (BIT(bit)))
 				omap_toggle_gpio_edge_triggering(bank, bit);
 
-			ipipe_handle_demuxed_irq(irq_find_mapping(bank->chip.irqdomain,
+			generic_handle_irq(irq_find_mapping(bank->chip.irqdomain,
 							    bit));
 		}
 	}
@@ -790,9 +788,9 @@ static void omap_gpio_irq_handler(unsigned int irq, struct irq_desc *desc)
 exit:
 	if (!unmasked)
 		chained_irq_exit(irqchip, desc);
-#ifndef CONFIG_IPIPE
-	pm_runtime_put(bank->dev);
-#endif
+
+	if (!irqs_pipelined())
+		pm_runtime_put(bank->dev);
 }
 
 static unsigned int omap_gpio_irq_startup(struct irq_data *d)
@@ -852,7 +850,7 @@ static void omap_gpio_mask_irq(struct irq_data *d)
 	spin_unlock_irqrestore(&bank->lock, flags);
 }
 
-static void omap_gpio_mask_ack_irq(struct irq_data *d)
+static void omap_gpio_hold_irq(struct irq_data *d)
 {
 	struct gpio_bank *bank = omap_irq_data_get_bank(d);
 	unsigned offset = d->hwirq;
@@ -1183,11 +1181,12 @@ static int omap_gpio_probe(struct platform_device *pdev)
 	irqc->irq_shutdown = omap_gpio_irq_shutdown,
 	irqc->irq_ack = omap_gpio_ack_irq,
 	irqc->irq_mask = omap_gpio_mask_irq,
-	irqc->irq_mask_ack = omap_gpio_mask_ack_irq,
+	irqc->irq_hold = omap_gpio_hold_irq,
 	irqc->irq_unmask = omap_gpio_unmask_irq,
 	irqc->irq_set_type = omap_gpio_irq_type,
 	irqc->irq_set_wake = omap_gpio_wake_enable,
 	irqc->name = dev_name(&pdev->dev);
+	irqc->flags = IRQCHIP_PIPELINE_SAFE;
 
 	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (unlikely(!res)) {
@@ -1289,7 +1288,7 @@ static void omap2plus_enable_irqdesc(struct ipipe_domain *ipd, unsigned irq)
 	struct irq_data *idata = irq_desc_get_irq_data(desc);
 	struct irq_chip *chip = irq_data_get_irq_chip(idata);
 
-	if (chip->irq_mask_ack == omap_gpio_mask_ack_irq) {
+	if (chip->irq_hold == omap_gpio_hold_irq) {
 		/* It is a gpio. */
 		struct gpio_bank *bank = irq_data_get_irq_chip_data(idata);
 
@@ -1312,7 +1311,7 @@ static void omap2plus_disable_irqdesc(struct ipipe_domain *ipd, unsigned irq)
 	struct irq_data *idata = irq_desc_get_irq_data(desc);
 	struct irq_chip *chip = irq_data_get_irq_chip(idata);
 
-	if (chip->irq_mask_ack == omap_gpio_mask_ack_irq) {
+	if (chip->irq_hold == omap_gpio_hold_irq) {
 		/* It is a gpio. */
 		struct gpio_bank *bank = irq_data_get_irq_chip_data(idata);
 

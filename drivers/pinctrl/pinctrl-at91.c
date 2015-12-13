@@ -24,7 +24,6 @@
 #include <linux/pinctrl/pinmux.h>
 /* Since we request GPIOs from ourself */
 #include <linux/pinctrl/consumer.h>
-#include <linux/ipipe.h>
 
 #include "pinctrl-at91.h"
 #include "core.h"
@@ -1629,7 +1628,7 @@ static void gpio_irq_handler(unsigned irq, struct irq_desc *desc)
 		}
 
 		for_each_set_bit(n, &isr, BITS_PER_LONG) {
-			ipipe_handle_demuxed_irq(irq_find_mapping(
+			generic_handle_irq(irq_find_mapping(
 						gpio_chip->irqdomain, n));
 		}
 	}

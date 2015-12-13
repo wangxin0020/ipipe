@@ -98,6 +98,46 @@ static void tzic_irq_resume(struct irq_data *d)
 #define tzic_irq_resume NULL
 #endif
 
+static void tzic_set_mute_level(struct irq_data *d, bool high)
+{
+	unsigned int irq = irqd_to_hwirq(d);
+	int val;
+	
+	if (irq >= TZIC_NUM_IRQS)
+		return;
+
+	val = high ? 0 : 0x80;
+	__raw_writeb(val, tzic_base + TZIC_PRIORITY0 + irq);
+}
+
+static unsigned int tzic_irq_startup(struct irq_data *d)
+{
+	struct irq_chip *chip = irq_data_get_irq_chip(d);
+
+	if (irqd_cannot_mute(d))
+		tzic_set_mute_level(d, true);
+
+	chip->irq_unmask(d);
+
+	return 0;
+}
+
+static void tzic_irq_shutdown(struct irq_data *d)
+{
+	struct irq_chip *chip = irq_data_get_irq_chip(d);
+
+	if (irqd_cannot_mute(d))
+		tzic_set_mute_level(d, false);
+
+	chip->irq_mask(d);
+}
+
+static void tzic_mute(bool on)
+{
+	int val = on ? 0x10 : 0xf0;
+	__raw_writel(val, tzic_base + TZIC_PRIOMASK);
+}
+
 static struct mxc_extra_irq tzic_extra_irq = {
 #ifdef CONFIG_FIQ
 	.set_irq_fiq = tzic_set_irq_fiq,
@@ -117,12 +157,15 @@ static __init void tzic_init_gc(int idx, unsigned int irq_start)
 	ct = gc->chip_types;
 	ct->chip.irq_mask = irq_gc_mask_disable_reg;
 	ct->chip.irq_unmask = irq_gc_unmask_enable_reg;
-#ifdef CONFIG_IPIPE
-	ct->chip.irq_mask_ack = irq_gc_mask_disable_reg;
-#endif /* CONFIG_IPIPE */
+	ct->chip.irq_hold = irq_gc_mask_disable_reg;
 	ct->chip.irq_set_wake = irq_gc_set_wake;
 	ct->chip.irq_suspend = tzic_irq_suspend;
 	ct->chip.irq_resume = tzic_irq_resume;
+	ct->chip.irq_startup = tzic_irq_startup;
+	ct->chip.irq_shutdown = tzic_irq_shutdown;
+	ct->chip.irq_set_mute_level = tzic_set_mute_level;
+	ct->chip.irq_mute = tzic_mute;
+	ct->chip.flags = IRQCHIP_PIPELINE_SAFE;
 	ct->regs.disable = TZIC_ENCLEAR0(idx);
 	ct->regs.enable = TZIC_ENSET0(idx);
 
@@ -144,33 +187,12 @@ static void __exception_irq_entry tzic_handle_irq(struct pt_regs *regs)
 			while (stat) {
 				handled = 1;
 				irqofs = fls(stat) - 1;
-				ipipe_handle_domain_irq(domain, irqofs + i * 32, regs);
+				handle_domain_irq(domain, irqofs + i * 32, regs);
 				stat &= ~(1 << irqofs);
 			}
 		}
 	} while (handled);
 }
-
- 
-#if defined(CONFIG_IPIPE)
-void tzic_set_irq_prio(unsigned irq, unsigned hi)
-{
-	if (irq >= TZIC_NUM_IRQS)
-		return;
-
-	__raw_writeb(hi ? 0 : 0x80, tzic_base + TZIC_PRIORITY0 + irq);
-}
-
-void tzic_mute_pic(void)
-{
-	__raw_writel(0x10, tzic_base + TZIC_PRIOMASK);
-}
-
-void tzic_unmute_pic(void)
-{
-	__raw_writel(0xf0, tzic_base + TZIC_PRIOMASK);
-}
-#endif /* CONFIG_IPIPE */
 
 /*
  * This function initializes the TZIC hardware and disables all the

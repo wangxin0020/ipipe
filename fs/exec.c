@@ -862,10 +862,10 @@ static int exec_mmap(struct mm_struct *mm)
 	task_lock(tsk);
 	active_mm = tsk->active_mm;
 	tsk->mm = mm;
-	ipipe_mm_switch_protect(flags);
+	dovetail_switch_mm_enter(flags);
 	tsk->active_mm = mm;
 	activate_mm(active_mm, mm);
-	ipipe_mm_switch_unprotect(flags);
+	dovetail_switch_mm_exit(flags);
 	tsk->mm->vmacache_seqnum = 0;
 	vmacache_flush(tsk);
 	task_unlock(tsk);

@@ -110,12 +110,12 @@ __common_int_entry:
 
 	r1 =  sp;
 	SP += -12;
-#ifdef CONFIG_IPIPE
-	call ___ipipe_grab_irq
+#ifdef CONFIG_IRQ_PIPELINE
+	call _enter_irq_pipeline
 	SP += 12;
 	cc = r0 == 0;
 	if cc jump .Lcommon_restore_context;
-#else /* CONFIG_IPIPE */
+#else /* !CONFIG_IRQ_PIPELINE */
 
 #ifdef CONFIG_PREEMPT
 	r7 = sp;

@@ -72,6 +72,13 @@ enum irqchip_irq_state;
  * IRQ_IS_POLLED		- Always polled by another interrupt. Exclude
  *				  it from the spurious interrupt detection
  *				  mechanism and from core side polling.
+ * IRQ_PIPELINED                - Interrupt becomes non-maskable when the pipeline is
+ *                                enabled. Such interrupt may be taken and the associated
+ *                                IRQ handler may run regardless of the interrupt state
+ *                                maintained by local_irq_save/disable().
+ * IRQ_STICKY                   - Interrupt should be dispatched to the current domain
+ *                                in non-maskable mode regardless of domain priorities.
+ * IRQ_CHAINED                  - Interrupt is chained.
  */
 enum {
 	IRQ_TYPE_NONE		= 0x00000000,
@@ -97,13 +104,16 @@ enum {
 	IRQ_NOTHREAD		= (1 << 16),
 	IRQ_PER_CPU_DEVID	= (1 << 17),
 	IRQ_IS_POLLED		= (1 << 18),
+	IRQ_PIPELINED		= (1 << 19),
+	IRQ_STICKY		= (1 << 20),
+	IRQ_CHAINED		= (1 << 21),
 };
 
 #define IRQF_MODIFY_MASK	\
 	(IRQ_TYPE_SENSE_MASK | IRQ_NOPROBE | IRQ_NOREQUEST | \
 	 IRQ_NOAUTOEN | IRQ_MOVE_PCNTXT | IRQ_LEVEL | IRQ_NO_BALANCING | \
 	 IRQ_PER_CPU | IRQ_NESTED_THREAD | IRQ_NOTHREAD | IRQ_PER_CPU_DEVID | \
-	 IRQ_IS_POLLED)
+	 IRQ_IS_POLLED | IRQ_PIPELINED | IRQ_STICKY)
 
 #define IRQ_NO_BALANCING_MASK	(IRQ_PER_CPU | IRQ_NO_BALANCING)
 
@@ -156,6 +166,9 @@ struct irq_data {
 	unsigned int		state_use_accessors;
 	struct irq_chip		*chip;
 	struct irq_domain	*domain;
+#ifdef CONFIG_IRQ_PIPELINE
+	ipipe_spinlock_t	lock;
+#endif
 #ifdef	CONFIG_IRQ_DOMAIN_HIERARCHY
 	struct irq_data		*parent_data;
 #endif
@@ -182,6 +195,8 @@ struct irq_data {
  * IRQD_IRQ_MASKED		- Masked state of the interrupt
  * IRQD_IRQ_INPROGRESS		- In progress state of the interrupt
  * IRQD_WAKEUP_ARMED		- Wakeup mode armed
+ * IRQD_HIGH_PRIORITY		- Hint for the chip to raise interrupt
+ *                                priority
  */
 enum {
 	IRQD_TRIGGER_MASK		= 0xf,
@@ -196,6 +211,7 @@ enum {
 	IRQD_IRQ_MASKED			= (1 << 17),
 	IRQD_IRQ_INPROGRESS		= (1 << 18),
 	IRQD_WAKEUP_ARMED		= (1 << 19),
+	IRQD_HIGH_PRIORITY		= (1 << 20),
 };
 
 static inline bool irqd_is_setaffinity_pending(struct irq_data *d)
@@ -272,6 +288,15 @@ static inline bool irqd_is_wakeup_armed(struct irq_data *d)
 	return d->state_use_accessors & IRQD_WAKEUP_ARMED;
 }
 
+static inline bool irqd_has_highpri(struct irq_data *d)
+{
+	return d->state_use_accessors & IRQD_HIGH_PRIORITY;
+}
+
+static inline bool irqd_cannot_mute(struct irq_data *d)
+{
+	return IS_ENABLED(CONFIG_IRQ_MUTE) && irqd_has_highpri(d);
+}
 
 /*
  * Functions for chained handlers which can be enabled/disabled by the
@@ -341,6 +366,9 @@ struct irq_chip {
 	void		(*irq_mask_ack)(struct irq_data *data);
 	void		(*irq_unmask)(struct irq_data *data);
 	void		(*irq_eoi)(struct irq_data *data);
+	void		(*irq_move)(struct irq_data *data);
+	void		(*irq_hold)(struct irq_data *data);
+	void		(*irq_release)(struct irq_data *data);
 
 	int		(*irq_set_affinity)(struct irq_data *data, const struct cpumask *dest, bool force);
 	int		(*irq_retrigger)(struct irq_data *data);
@@ -349,11 +377,6 @@ struct irq_chip {
 
 	void		(*irq_bus_lock)(struct irq_data *data);
 	void		(*irq_bus_sync_unlock)(struct irq_data *data);
-#ifdef CONFIG_IPIPE
-	void		(*irq_move)(struct irq_data *data);
-	void		(*irq_hold)(struct irq_data *data);
-	void		(*irq_release)(struct irq_data *data);
-#endif /* CONFIG_IPIPE */
 
 	void		(*irq_cpu_online)(struct irq_data *data);
 	void		(*irq_cpu_offline)(struct irq_data *data);
@@ -374,6 +397,9 @@ struct irq_chip {
 	int		(*irq_get_irqchip_state)(struct irq_data *data, enum irqchip_irq_state which, bool *state);
 	int		(*irq_set_irqchip_state)(struct irq_data *data, enum irqchip_irq_state which, bool state);
 
+	void		(*irq_set_mute_level)(struct irq_data *data, bool high);
+	void		(*irq_mute)(bool on);
+
 	unsigned long	flags;
 };
 
@@ -388,6 +414,8 @@ struct irq_chip {
  * IRQCHIP_SKIP_SET_WAKE:	Skip chip.irq_set_wake(), for this irq chip
  * IRQCHIP_ONESHOT_SAFE:	One shot does not require mask/unmask
  * IRQCHIP_EOI_THREADED:	Chip requires eoi() on unmask in threaded mode
+ * IRQCHIP_PIPELINE_SAFE:	Chip can work in pipelined mode
+ * IRQCHIP_PIPELINE_UNLOCKED:	Don't hold irqd lock when calling regular handlers
  */
 enum {
 	IRQCHIP_SET_TYPE_MASKED		= (1 <<  0),
@@ -397,6 +425,8 @@ enum {
 	IRQCHIP_SKIP_SET_WAKE		= (1 <<  4),
 	IRQCHIP_ONESHOT_SAFE		= (1 <<  5),
 	IRQCHIP_EOI_THREADED		= (1 <<  6),
+	IRQCHIP_PIPELINE_SAFE		= (1 <<  7),
+	IRQCHIP_PIPELINE_UNLOCKED	= (1 <<  8),
 };
 
 /* This include will go away once we isolated irq_desc usage to core code */
@@ -460,6 +490,7 @@ extern void handle_percpu_irq(unsigned int irq, struct irq_desc *desc);
 extern void handle_percpu_devid_irq(unsigned int irq, struct irq_desc *desc);
 extern void handle_bad_irq(unsigned int irq, struct irq_desc *desc);
 extern void handle_nested_irq(unsigned int irq);
+extern void handle_synthetic_irq(unsigned int irq, struct irq_desc *desc);
 
 extern int irq_chip_compose_msi_msg(struct irq_data *data, struct msi_msg *msg);
 #ifdef	CONFIG_IRQ_DOMAIN_HIERARCHY
@@ -468,11 +499,8 @@ extern int irq_chip_retrigger_hierarchy(struct irq_data *data);
 extern void irq_chip_mask_parent(struct irq_data *data);
 extern void irq_chip_unmask_parent(struct irq_data *data);
 extern void irq_chip_eoi_parent(struct irq_data *data);
-#ifdef CONFIG_IPIPE
 extern void irq_chip_hold_parent(struct irq_data *data);
 extern void irq_chip_release_parent(struct irq_data *data);
-#endif
-
 extern int irq_chip_set_affinity_parent(struct irq_data *data,
 					const struct cpumask *dest,
 					bool force);
@@ -758,7 +786,7 @@ struct irq_chip_type {
  * different flow mechanisms (level/edge) for it.
  */
 struct irq_chip_generic {
-#ifdef CONFIG_IPIPE
+#ifdef CONFIG_IRQ_PIPELINE
 	ipipe_spinlock_t	lock;
 #else
 	raw_spinlock_t		lock;
@@ -826,6 +854,10 @@ void irq_gc_mask_clr_bit(struct irq_data *d);
 void irq_gc_unmask_enable_reg(struct irq_data *d);
 void irq_gc_ack_set_bit(struct irq_data *d);
 void irq_gc_ack_clr_bit(struct irq_data *d);
+void irq_gc_mask_clr_ack_clr_bit(struct irq_data *d);
+void irq_gc_mask_set_ack_clr_bit(struct irq_data *d);
+void irq_gc_mask_set_ack_set_bit(struct irq_data *d);
+void irq_gc_mask_clr_ack_set_bit(struct irq_data *d);
 void irq_gc_mask_disable_reg_and_ack(struct irq_data *d);
 void irq_gc_eoi(struct irq_data *d);
 int irq_gc_set_wake(struct irq_data *d, unsigned int on);
@@ -859,28 +891,18 @@ static inline struct irq_chip_type *irq_data_get_chip_type(struct irq_data *d)
 #define IRQ_MSK(n) (u32)((n) < 32 ? ((1 << (n)) - 1) : UINT_MAX)
 
 #ifdef CONFIG_SMP
-static inline unsigned long irq_gc_lock(struct irq_chip_generic *gc)
+static inline void irq_gc_lock(struct irq_chip_generic *gc)
 {
-	unsigned long flags = 0;
-	raw_spin_lock_irqsave_cond(&gc->lock, flags);
-	return flags;
+	raw_spin_lock(&gc->lock);
 }
 
-static inline void 
-irq_gc_unlock(struct irq_chip_generic *gc, unsigned long flags)
+static inline void irq_gc_unlock(struct irq_chip_generic *gc)
 {
-	raw_spin_unlock_irqrestore_cond(&gc->lock, flags);
+	raw_spin_unlock(&gc->lock);
 }
 #else
-static inline unsigned long irq_gc_lock(struct irq_chip_generic *gc) 
-{ 
-	return hard_cond_local_irq_save();
-}
-static inline void 
-irq_gc_unlock(struct irq_chip_generic *gc, unsigned long flags) 
-{ 
-	hard_cond_local_irq_restore(flags);
-}
+static inline void irq_gc_lock(struct irq_chip_generic *gc) { }
+static inline void irq_gc_unlock(struct irq_chip_generic *gc) { }
 #endif
 
 static inline void irq_reg_writel(struct irq_chip_generic *gc,
@@ -900,5 +922,122 @@ static inline u32 irq_reg_readl(struct irq_chip_generic *gc,
 	else
 		return readl(gc->reg_base + reg_offset);
 }
+
+#ifdef CONFIG_IRQ_PIPELINE
+
+#define irq_chip_state_lock_irqsave(__desc, __flags)			\
+	raw_spin_lock_irqsave(&(__desc)->irq_data.lock, (__flags))
+#define irq_chip_state_unlock_irqrestore(__desc, __flags)		\
+	raw_spin_unlock_irqrestore(&(__desc)->irq_data.lock, (__flags))
+#define irq_chip_state_lock_irq(__desc)					\
+	raw_spin_lock_irq(&(__desc)->irq_data.lock)
+#define irq_chip_state_unlock_irq(__desc)				\
+	raw_spin_unlock_irq(&(__desc)->irq_data.lock)
+#define irq_chip_state_lock(__desc)					\
+	raw_spin_lock(&(__desc)->irq_data.lock)
+#define irq_chip_state_unlock(__desc)					\
+	raw_spin_unlock(&(__desc)->irq_data.lock)
+
+static inline
+void prepare_call_to_chip_handler(struct irq_desc *desc, unsigned long flags)
+{
+	struct irq_chip *chip = irq_desc_get_chip(desc);
+
+	if (chip->flags & IRQCHIP_PIPELINE_UNLOCKED)
+		irq_chip_state_unlock_irqrestore(desc, flags);
+}
+
+static inline
+void complete_call_to_chip_handler(struct irq_desc *desc, unsigned long flags)
+{
+	struct irq_chip *chip = irq_desc_get_chip(desc);
+
+	if (!(chip->flags & IRQCHIP_PIPELINE_UNLOCKED))
+		irq_chip_state_unlock_irqrestore(desc, flags);
+}
+
+void __irq_set_pipelining(struct irq_desc *desc, bool on);
+
+int irq_set_pipelining(unsigned int irq, bool on);
+
+#else	/* !CONFIG_IRQ_PIPELINE */
+
+#define irq_chip_state_lock_irqsave(__desc, __flags)		\
+	do { (void)(__desc); (void)(__flags); } while (0)
+#define irq_chip_state_unlock_irqrestore(__desc, __flags)	\
+	do { (void)(__desc); (void)(__flags); } while (0)
+#define irq_chip_state_lock_irq(__desc)		do { (void)(__desc); } while (0)
+#define irq_chip_state_unlock_irq(__desc)	do { (void)(__desc); } while (0)
+#define irq_chip_state_lock(__desc)		do { (void)(__desc); } while (0)
+#define irq_chip_state_unlock(__desc)		do { (void)(__desc); } while (0)
+
+#define prepare_call_to_chip_handler(__desc, __flags)	\
+  	do { (void)(__flags); } while (0)
+#define complete_call_to_chip_handler(__desc, __flags)	\
+  	do { (void)(__flags); } while (0)
+
+#endif	/* !CONFIG_IRQ_PIPELINE */
+
+/*
+ * struct irqchip_muter - Generic data structure for IRQ muting
+ * @mute:		Mute/unmute handler
+ * @irq_nomute_map	Map of high priority (hw) irqs
+ * @next		Next muter in registration list
+ */
+struct irqchip_muter {
+	struct irq_chip *chip;
+	unsigned long irq_nomute_map;
+	struct list_head next;
+};
+
+#ifdef CONFIG_IRQ_MUTE
+
+static inline int
+irqchip_set_nomute_map(struct irqchip_muter *muter, int hwirq)
+{
+	unsigned long oldmap = muter->irq_nomute_map;
+	muter->irq_nomute_map |= (1 << hwirq);
+	return oldmap == 0;
+}
+
+static inline int
+irqchip_clr_nomute_map(struct irqchip_muter *muter, int hwirq)
+{
+	muter->irq_nomute_map &= ~(1 << hwirq);
+	return muter->irq_nomute_map == 0;
+}
+
+void register_irqchip_muter(struct irqchip_muter *muter,
+			    struct irq_chip *chip);
+void unregister_irqchip_muter(struct irqchip_muter *muter);
+void irq_mute_switch(bool on);
+
+extern struct list_head irqchip_muters;
+
+static inline void irq_mute_all(void)
+{
+	if (!list_empty(&irqchip_muters))
+		irq_mute_switch(true);
+}
+
+static inline void irq_unmute_all(void)
+{
+	if (!list_empty(&irqchip_muters))
+		irq_mute_switch(false);
+}
+
+#else
+
+static inline int
+irqchip_set_nomute_map(struct irqchip_muter *muter, int hwirq) { return 0; }
+static inline int
+irqchip_clr_nomute_map(struct irqchip_muter *muter, int hwirq) { return 0; }
+static inline void register_irqchip_muter(struct irqchip_muter *muter,
+					  struct irq_chip *chip) { }
+static inline void unregister_irqchip_muter(struct irqchip_muter *muter) { }
+static inline void irq_mute_all(void) { }
+static inline void irq_unmute_all(void) { }
+
+#endif	/* !CONFIG_IRQ_MUTE */
 
 #endif /* _LINUX_IRQ_H */

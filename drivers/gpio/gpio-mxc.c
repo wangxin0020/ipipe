@@ -33,7 +33,6 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/module.h>
-#include <linux/ipipe.h>
 #include <asm-generic/bug.h>
 
 enum mxc_gpio_hwtype {
@@ -67,9 +66,7 @@ struct mxc_gpio_port {
 	struct irq_domain *domain;
 	struct bgpio_chip bgc;
 	u32 both_edges;
-#ifdef CONFIG_IPIPE
-	unsigned nonroot;
-#endif /* CONFIG_IPIPE */
+	struct irqchip_muter muter;
 };
 
 static struct mxc_gpio_hwdata imx1_imx21_gpio_hwdata = {
@@ -269,7 +266,7 @@ static void mxc_gpio_irq_handler(struct mxc_gpio_port *port, u32 irq_stat)
 		if (port->both_edges & (1 << irqoffset))
 			mxc_flip_edge(port, irqoffset);
 
-		ipipe_handle_demuxed_irq(irq_find_mapping(port->domain, irqoffset));
+		generic_handle_irq(irq_find_mapping(port->domain, irqoffset));
 
 		irq_stat &= ~(1 << irqoffset);
 	}
@@ -343,6 +340,68 @@ static int gpio_set_wake_irq(struct irq_data *d, u32 enable)
 	return 0;
 }
 
+static unsigned int mxc_gpio_startup_irq(struct irq_data *d)
+{
+	struct irq_chip_generic *gc;
+	struct mxc_gpio_port *port;
+	struct irq_chip *chip;
+	struct irq_data *pd;
+	unsigned int irq;
+
+	if (irqd_cannot_mute(d)) {
+		gc = irq_data_get_irq_chip_data(d);
+		port = gc->private;
+		irq = irqd_to_hwirq(d);
+		if (irqchip_set_nomute_map(&port->muter, irq)) {
+			pd = irq_get_irq_data(port->irq);
+			chip = irq_data_get_irq_chip(pd);
+			if (chip->irq_set_mute_level)
+				chip->irq_set_mute_level(pd, true);
+			if (port->irq_high > 0) {
+				pd = irq_get_irq_data(port->irq_high);
+				chip = irq_data_get_irq_chip(pd);
+				if (chip->irq_set_mute_level)
+					chip->irq_set_mute_level(pd, true);
+			}
+		}
+	}
+
+	chip = irq_data_get_irq_chip(d);
+	chip->irq_unmask(d);
+
+	return 0;
+}
+
+static void mxc_gpio_shutdown_irq(struct irq_data *d)
+{
+	struct irq_chip_generic *gc;
+	struct mxc_gpio_port *port;
+	struct irq_chip *chip;
+	struct irq_data *pd;
+	unsigned int irq;
+
+	if (irqd_cannot_mute(d)) {
+		gc = irq_data_get_irq_chip_data(d);
+		port = gc->private;
+		irq = irqd_to_hwirq(d);
+		if (irqchip_clr_nomute_map(&port->muter, irq)) {
+			pd = irq_get_irq_data(port->irq);
+			chip = irq_data_get_irq_chip(pd);
+			if (chip->irq_set_mute_level)
+				chip->irq_set_mute_level(pd, false);
+			if (port->irq_high > 0) {
+				pd = irq_get_irq_data(port->irq_high);
+				chip = irq_data_get_irq_chip(pd);
+				if (chip->irq_set_mute_level)
+					chip->irq_set_mute_level(pd, false);
+			}
+		}
+	}
+
+	chip = irq_data_get_irq_chip(d);
+	chip->irq_mask(d);
+}
+
 static void __init mxc_gpio_init_gc(struct mxc_gpio_port *port, int irq_base)
 {
 	struct irq_chip_generic *gc;
@@ -356,8 +415,12 @@ static void __init mxc_gpio_init_gc(struct mxc_gpio_port *port, int irq_base)
 	ct->chip.irq_ack = irq_gc_ack_set_bit;
 	ct->chip.irq_mask = irq_gc_mask_clr_bit;
 	ct->chip.irq_unmask = irq_gc_mask_set_bit;
+	ct->chip.irq_hold = irq_gc_mask_clr_ack_set_bit;
 	ct->chip.irq_set_type = gpio_set_irq_type;
 	ct->chip.irq_set_wake = gpio_set_wake_irq;
+	ct->chip.irq_startup = mxc_gpio_startup_irq;
+	ct->chip.irq_shutdown = mxc_gpio_shutdown_irq;
+	ct->chip.flags = IRQCHIP_PIPELINE_SAFE;
 	ct->regs.ack = GPIO_ISR;
 	ct->regs.mask = GPIO_IMR;
 
@@ -482,6 +545,13 @@ static int mxc_gpio_probe(struct platform_device *pdev)
 	/* gpio-mxc can be a generic irq chip */
 	mxc_gpio_init_gc(port, irq_base);
 
+	/*
+	 * Assume port->irq_high belongs to the same IC than
+	 * port->irq, meaning that we can handle both with a single
+	 * muter.
+	 */
+	register_irqchip_muter(&port->muter, irq_get_chip(port->irq));
+
 	list_add_tail(&port->node, &mxc_gpio_ports);
 
 	return 0;
@@ -505,122 +575,6 @@ static struct platform_driver mxc_gpio_driver = {
 	.probe		= mxc_gpio_probe,
 	.id_table	= mxc_gpio_devtype,
 };
-
-#if defined(CONFIG_IPIPE) && \
-	(defined(CONFIG_MXC_TZIC) || defined(CONFIG_SOC_IMX6Q))
-extern void tzic_set_irq_prio(int irq, int hi);
-extern void tzic_mute_pic(void);
-extern void tzic_unmute_pic(void);
-extern void gic_mute(void);
-extern void gic_unmute(void);
-extern void gic_set_irq_prio(int irq, int hi);
-
-#ifdef CONFIG_MXC_TZIC
-static unsigned is_mx5;
-#endif /* CONFIG_MXC_TZIC */
-#ifdef CONFIG_SOC_IMX6Q
-static unsigned is_mx6;
-#endif /* CONFIG_SOC_IMX6Q */
-
-static void mxc_set_irq_prio(int irq, int hi)
-{
-	struct irq_desc *desc = irq_to_desc(irq);
-	struct irq_data *idata = irq_desc_get_irq_data(desc);
-
-#ifdef CONFIG_SOC_IMX6Q
-	if (is_mx6)
-		gic_set_irq_prio(idata->hwirq, hi);
-#endif /* CONFIG_SOC_IMX6Q */
-
-#ifdef CONFIG_MXC_TZIC
-	if (is_mx5)
-		tzic_set_irq_prio(idata->hwirq, hi);
-#endif /* CONFIG_MXC_TZIC */
-}
-
-static void mxc_enable_irqdesc(struct ipipe_domain *ipd, unsigned irq)
-{
-	struct irq_desc *desc = irq_to_desc(irq);
-	struct irq_data *idata = irq_desc_get_irq_data(desc);
-	struct irq_chip *chip = irq_data_get_irq_chip(idata);
-
-	if (chip->irq_set_type == gpio_set_irq_type) {
-		/* It is a gpio. */
-		struct irq_chip_generic *gc = irq_data_get_irq_chip_data(idata);
-		struct mxc_gpio_port *port = gc->private;
-
-		if (ipd == &ipipe_root) {
-			port->nonroot &= ~(1 << idata->hwirq);
-			if (port->nonroot == 0) {
-				mxc_set_irq_prio(port->irq, 0);
-				if (port->irq_high > 0)
-					mxc_set_irq_prio(port->irq_high, 0);
-			}
-		} else {
-			port->nonroot |= (1 << idata->hwirq);
-			if (port->nonroot == (1 << idata->hwirq)) {
-				mxc_set_irq_prio(port->irq, 1);
-				if (port->irq_high > 0)
-					mxc_set_irq_prio(port->irq_high, 1);
-			}
-		}
-	} else
-		mxc_set_irq_prio(irq, ipd != &ipipe_root);
-}
-
-static void mxc_disable_irqdesc(struct ipipe_domain *ipd, unsigned irq)
-{
-	struct irq_desc *desc = irq_to_desc(irq);
-	struct irq_data *idata = irq_desc_get_irq_data(desc);
-	struct irq_chip *chip = irq_data_get_irq_chip(idata);
-
-	if (chip->irq_set_type == gpio_set_irq_type) {
-		/* It is a gpio. */
-		struct irq_chip_generic *gc = irq_data_get_irq_chip_data(idata);
-		struct mxc_gpio_port *port = gc->private;
-
-		if (ipd != &ipipe_root) {
-			port->nonroot &= ~(1 << idata->hwirq);
-			if (port->nonroot == 0) {
-				mxc_set_irq_prio(port->irq, 0);
-				if (port->irq_high > 0)
-					mxc_set_irq_prio(port->irq_high, 0);
-			}
-		}
-	} else if (ipd != &ipipe_root)
-		mxc_set_irq_prio(irq, 0);
-}
-
-#ifdef CONFIG_MXC_TZIC
-void __init mxc_pic_muter_register(void)
-{
-	struct ipipe_mach_pic_muter pic_muter = {
-		.enable_irqdesc = mxc_enable_irqdesc,
-		.disable_irqdesc = mxc_disable_irqdesc,
-		.mute = tzic_mute_pic,
-		.unmute = tzic_unmute_pic,
-	};
-
-	is_mx5 = 1;
-	ipipe_pic_muter_register(&pic_muter);
-}
-#endif
-
-#ifdef CONFIG_SOC_IMX6Q
-void __init mx6_pic_muter_register(void)
-{
-	struct ipipe_mach_pic_muter pic_muter = {
-		.enable_irqdesc = mxc_enable_irqdesc,
-		.disable_irqdesc = mxc_disable_irqdesc,
-		.mute = gic_mute,
-		.unmute = gic_unmute,
-	};
-
-	is_mx6 = 1;
-	ipipe_pic_muter_register(&pic_muter);
-}
-#endif /* CONFIG_SOC_IMX6Q */
-#endif /* CONFIG_IPIPE */
 
 static int __init gpio_mxc_init(void)
 {

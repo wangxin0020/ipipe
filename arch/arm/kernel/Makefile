@@ -41,6 +41,7 @@ obj-$(CONFIG_HIBERNATION)	+= hibernate.o
 obj-$(CONFIG_SMP)		+= smp.o
 ifdef CONFIG_MMU
 obj-$(CONFIG_SMP)		+= smp_tlb.o
+obj-$(CONFIG_DOVETAIL)		+= dovetail.o
 endif
 obj-$(CONFIG_HAVE_ARM_SCU)	+= smp_scu.o
 obj-$(CONFIG_HAVE_ARM_TWD)	+= smp_twd.o
@@ -84,8 +85,7 @@ head-y			:= head$(MMUEXT).o
 obj-$(CONFIG_DEBUG_LL)	+= debug.o
 obj-$(CONFIG_EARLY_PRINTK)	+= early_printk.o
 obj-$(CONFIG_RAW_PRINTK)	+= raw_printk.o
-obj-$(CONFIG_IPIPE)	+= ipipe.o
-obj-$(CONFIG_IPIPE_ARM_KUSER_TSC) += ipipe_tsc.o ipipe_tsc_asm.o
+obj-$(CONFIG_IRQ_PIPELINE)	+= irq_pipeline.o ipipe_tsc.o ipipe_tsc_asm.o
 
 obj-$(CONFIG_ARM_VIRT_EXT)	+= hyp-stub.o
 ifeq ($(CONFIG_ARM_PSCI),y)

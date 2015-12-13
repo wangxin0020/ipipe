@@ -119,7 +119,7 @@ void notrace restore_interrupts(void)
 static inline notrace int decrementer_check_overflow(void)
 {
  	u64 now = get_tb_or_rtc();
- 	u64 *next_tb = &__get_cpu_var(decrementers_next_tb);
+ 	u64 *next_tb = this_cpu_ptr(&decrementers_next_tb);
  
 	return now >= *next_tb;
 }
@@ -521,14 +521,16 @@ void __do_irq(struct pt_regs *regs)
 	___do_irq(irq, regs);
 }
 
-void do_IRQ(struct pt_regs *regs)
+int do_IRQ(struct pt_regs *regs)
 {
-	struct pt_regs *old_regs = set_irq_regs(regs);
-#ifdef CONFIG_IPIPE
-	__do_irq(regs);
-#else /* !CONFIG_IPIPE */
+	struct pt_regs *old_regs;
 	struct thread_info *curtp, *irqtp, *sirqtp;
 
+	if (irqs_pipelined())
+		return enter_irq_pipeline(regs);
+
+	old_regs = set_irq_regs(regs);
+	
 	/* Switch to the irq stack to handle this */
 	curtp = current_thread_info();
 	irqtp = hardirq_ctx[raw_smp_processor_id()];
@@ -538,7 +540,7 @@ void do_IRQ(struct pt_regs *regs)
 	if (unlikely(curtp == irqtp || curtp == sirqtp)) {
 		__do_irq(regs);
 		set_irq_regs(old_regs);
-		return;
+		return 1;
 	}
 
 	/* Prepare the thread_info in the irq stack */
@@ -557,9 +559,10 @@ void do_IRQ(struct pt_regs *regs)
 	/* Copy back updates to the thread_info */
 	if (irqtp->flags)
 		set_bits(irqtp->flags, &curtp->flags);
-#endif /* !CONFIG_IPIPE */
 
 	set_irq_regs(old_regs);
+
+	return 1;
 }
 
 void __init init_IRQ(void)

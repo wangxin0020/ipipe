@@ -981,7 +981,7 @@ static int putreg32(struct task_struct *child, unsigned regno, u32 value)
 		 */
 		regs->orig_ax = value;
 		if (syscall_get_nr(child, regs) >= 0)
-			task_thread_info(child)->status |= TS_COMPAT;
+			set_ti_local_flags(task_thread_info(child), TS_COMPAT);
 		break;
 
 	case offsetof(struct user32, regs.eflags):

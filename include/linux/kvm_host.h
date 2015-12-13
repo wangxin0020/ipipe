@@ -218,8 +218,8 @@ struct kvm_vcpu {
 #ifdef CONFIG_PREEMPT_NOTIFIERS
 	struct preempt_notifier preempt_notifier;
 #endif
-#ifdef CONFIG_IPIPE
-	struct ipipe_vm_notifier ipipe_notifier;
+#ifdef CONFIG_DOVETAIL
+	struct hypervisor_stall stall_notifier;
 #endif
 	int cpu;
 	int vcpu_id;

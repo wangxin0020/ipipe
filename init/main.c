@@ -44,6 +44,7 @@
 #include <linux/efi.h>
 #include <linux/tick.h>
 #include <linux/interrupt.h>
+#include <linux/irq_pipeline.h>
 #include <linux/taskstats_kern.h>
 #include <linux/delayacct.h>
 #include <linux/unistd.h>
@@ -550,7 +551,7 @@ asmlinkage __visible void __init start_kernel(void)
 	pidhash_init();
 	vfs_caches_init_early();
 	sort_main_extable();
-	__ipipe_init_early();
+	irq_pipeline_init_early();
 	trap_init();
 	mm_init();
 
@@ -579,6 +580,7 @@ asmlinkage __visible void __init start_kernel(void)
 	/* init some links before init_ISA_irqs() */
 	early_irq_init();
 	init_IRQ();
+	irq_pipeline_init();
 	tick_init();
 	rcu_init_nohz();
 	init_timers();
@@ -586,11 +588,6 @@ asmlinkage __visible void __init start_kernel(void)
 	softirq_init();
 	timekeeping_init();
 	time_init();
-	/*
-	 * We need to wait for the interrupt and time subsystems to be
-	 * initialized before enabling the pipeline.
-	 */
-	__ipipe_init();
 	sched_clock_postinit();
 	perf_event_init();
 	profile_init();
@@ -638,6 +635,7 @@ asmlinkage __visible void __init start_kernel(void)
 		late_time_init();
 	sched_clock_init();
 	calibrate_delay();
+	irq_pipeline_init_late();
 	pidmap_init();
 	anon_vma_init();
 	acpi_early_init();
@@ -882,7 +880,6 @@ static void __init do_basic_setup(void)
 	shmem_init();
 	driver_init();
 	init_irq_proc();
-  	__ipipe_init_proc();
 	do_ctors();
 	usermodehelper_enable();
 	do_initcalls();

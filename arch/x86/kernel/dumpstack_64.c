@@ -13,6 +13,7 @@
 #include <linux/sysfs.h>
 #include <linux/bug.h>
 #include <linux/nmi.h>
+#include <linux/irq_pipeline.h>
 
 #include <asm/stacktrace.h>
 
@@ -306,7 +307,7 @@ void show_regs(struct pt_regs *regs)
 	show_regs_print_info(KERN_DEFAULT);
 	__show_regs(regs, 1);
 #ifdef CONFIG_IPIPE
-	printk(KERN_DEFAULT "I-pipe domain %s\n", ipipe_current_domain->name);
+	printk(KERN_DEFAULT "I-pipe domain %s\n", current_irq_stage->name);
 #endif /* CONFIG_IPIPE */
 
 	/*

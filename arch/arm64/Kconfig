@@ -32,6 +32,8 @@ config ARM64
 	select GENERIC_IRQ_PROBE
 	select GENERIC_IRQ_SHOW
 	select GENERIC_IRQ_SHOW_LEVEL
+	select HAVE_IPIPE
+	select IPIPE_WANT_PREEMPTIBLE_SWITCH if (IPIPE && SMP)
 	select GENERIC_PCI_IOMAP
 	select GENERIC_SCHED_CLOCK
 	select GENERIC_SMP_IDLE_THREAD
@@ -85,10 +87,6 @@ config ARM64
 	select HAVE_CONTEXT_TRACKING if !IPIPE
 	help
 	  ARM 64-bit (AArch64) Linux support.
-
-config IPIPE_WANT_PREEMPTIBLE_SWITCH
-       depends on IPIPE
-       def_bool SMP
 
 config 64BIT
 	def_bool y
@@ -533,9 +531,9 @@ config HOTPLUG_CPU
 	  Say Y here to experiment with turning CPUs off and on.  CPUs
 	  can be controlled through /sys/devices/system/cpu.
 
-source kernel/ipipe/Kconfig
-
 source kernel/Kconfig.preempt
+
+source kernel/Kconfig.dovetail
 
 config UP_LATE_INIT
        def_bool y

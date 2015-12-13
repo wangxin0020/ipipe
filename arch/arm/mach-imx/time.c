@@ -31,8 +31,6 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
-#include <linux/ipipe.h>
-#include <linux/ipipe_tickdev.h>
 
 #include <asm/mach/time.h>
 
@@ -85,7 +83,6 @@ static struct clock_event_device clockevent_mxc;
 static enum clock_event_mode clockevent_mode = CLOCK_EVT_MODE_UNUSED;
 
 static void __iomem *timer_base;
-static unsigned long timer_base_phys;
 
 static inline void gpt_irq_disable(void)
 {
@@ -135,10 +132,47 @@ static unsigned long imx_read_current_timer(void)
 	return __raw_readl(sched_clock_reg);
 }
 
-static int __init mxc_clocksource_init(struct clk *timer_clk)
+#ifdef CONFIG_IRQ_PIPELINE
+
+static struct __ipipe_tscinfo tsc_info = {
+       .type = IPIPE_TSC_TYPE_FREERUNNING,
+       .u = {
+	       {
+		       .mask = 0xffffffff,
+	       },
+       },
+};
+
+static void mxc_tsc_init(struct clk *clk_per, unsigned long base_phys)
+{
+	unsigned long virt = (unsigned long)timer_base;
+
+	if (timer_is_v1()) {
+		tsc_info.u.counter_paddr = base_phys + MX1_2_TCN;
+		tsc_info.counter_vaddr = virt + MX1_2_TCN;
+	} else {
+		tsc_info.u.counter_paddr = base_phys + V2_TCN;
+		tsc_info.counter_vaddr = virt + V2_TCN;
+	}
+
+	tsc_info.freq = clk_get_rate(clk_per);
+	__ipipe_tsc_register(&tsc_info);
+}
+
+#else  /* !CONFIG_IRQ_PIPELINE */
+
+static inline
+void mxc_tsc_init(struct clk *clk_per, unsigned long base_phys)
+{ }
+
+#endif  /* CONFIG_IRQ_PIPELINE */
+
+static int __init mxc_clocksource_init(struct clk *timer_clk,
+				       unsigned long base_phys)
 {
 	unsigned int c = clk_get_rate(timer_clk);
 	void __iomem *reg = timer_base + (timer_is_v2() ? V2_TCN : MX1_2_TCN);
+	int ret;
 
 	imx_delay_timer.read_current_timer = &imx_read_current_timer;
 	imx_delay_timer.freq = c;
@@ -147,8 +181,14 @@ static int __init mxc_clocksource_init(struct clk *timer_clk)
 	sched_clock_reg = reg;
 
 	sched_clock_register(mxc_read_sched_clock, 32, c);
-	return clocksource_mmio_init(reg, "mxc_timer1", c, 200, 32,
-			clocksource_mmio_readl_up);
+	ret = clocksource_mmio_init(reg, "mxc_timer1", c, 200, 32,
+				    clocksource_mmio_readl_up);
+	if (ret)
+		return ret;
+
+	mxc_tsc_init(timer_clk, base_phys);
+
+	return 0;
 }
 
 /* clock event */
@@ -199,7 +239,7 @@ static void mxc_set_mode(enum clock_event_mode mode,
 	 * The timer interrupt generation is disabled at least
 	 * for enough time to call mxc_set_next_event()
 	 */
-	local_irq_save(flags);
+	flags = hard_local_irq_save();
 
 	/* Disable interrupt in GPT module */
 	gpt_irq_disable();
@@ -225,7 +265,7 @@ static void mxc_set_mode(enum clock_event_mode mode,
 
 	/* Remember timer mode */
 	clockevent_mode = mode;
-	local_irq_restore(flags);
+	hard_local_irq_restore(flags);
 
 	switch (mode) {
 	case CLOCK_EVT_MODE_PERIODIC:
@@ -239,9 +279,9 @@ static void mxc_set_mode(enum clock_event_mode mode,
 	 * to call mxc_set_next_event() or shutdown clock after
 	 * mode switching
 	 */
-		local_irq_save(flags);
+		flags = hard_local_irq_save();
 		gpt_irq_enable();
-		local_irq_restore(flags);
+		hard_local_irq_restore(flags);
 		break;
 	case CLOCK_EVT_MODE_SHUTDOWN:
 	case CLOCK_EVT_MODE_UNUSED:
@@ -251,8 +291,12 @@ static void mxc_set_mode(enum clock_event_mode mode,
 	}
 }
 
-static inline void mxc_timer_ack(void)
+/*
+ * IRQ handler for the timer
+ */
+static irqreturn_t mxc_timer_interrupt(int irq, void *dev_id)
 {
+	struct clock_event_device *evt = &clockevent_mxc;
 	uint32_t tstat;
 
 	if (timer_is_v2())
@@ -261,37 +305,11 @@ static inline void mxc_timer_ack(void)
 		tstat = __raw_readl(timer_base + MX1_2_TSTAT);
 
 	gpt_irq_acknowledge();
-}
 
-/*
- * IRQ handler for the timer
- */
-static irqreturn_t mxc_timer_interrupt(int irq, void *dev_id)
-{
-	struct clock_event_device *evt = &clockevent_mxc;
-
-	if (!clockevent_ipipe_stolen(evt))
-		mxc_timer_ack();
-
-	evt->event_handler(evt);
+	clockevents_handle_event(evt);
 
 	return IRQ_HANDLED;
 }
-
-#ifdef CONFIG_IPIPE
-static struct __ipipe_tscinfo tsc_info = {
-       .type = IPIPE_TSC_TYPE_FREERUNNING,
-       .u = {
-	       {
-		       .mask = 0xffffffff,
-	       },
-       },
-};
-
-static struct ipipe_timer mxc_itimer = {
-	.ack = mxc_timer_ack,
-};
-#endif
 
 static struct irqaction mxc_timer_irq = {
 	.name		= "i.MX Timer Tick",
@@ -301,30 +319,31 @@ static struct irqaction mxc_timer_irq = {
 
 static struct clock_event_device clockevent_mxc = {
 	.name		= "mxc_timer1",
-	.features	= CLOCK_EVT_FEAT_ONESHOT,
+	.features	= CLOCK_EVT_FEAT_ONESHOT | CLOCK_EVT_FEAT_PIPELINE,
 	.set_mode	= mxc_set_mode,
 	.set_next_event	= mx1_2_set_next_event,
 	.rating		= 200,
-#ifdef CONFIG_IPIPE
-	.ipipe_timer    = &mxc_itimer,
-#endif
 };
 
-static int __init mxc_clockevent_init(struct clk *timer_clk)
+static int __init mxc_clockevent_init(int irq, struct clk *timer_clk)
 {
 	if (timer_is_v2())
 		clockevent_mxc.set_next_event = v2_set_next_event;
 
+	clockevent_mxc.irq = irq;
 	clockevent_mxc.cpumask = cpumask_of(0);
 	clockevents_config_and_register(&clockevent_mxc,
 					clk_get_rate(timer_clk),
 					0xff, 0xfffffffe);
+	/* Make irqs happen */
+	setup_irq(irq, &mxc_timer_irq);
 
 	return 0;
 }
 
 static void __init _mxc_timer_init(int irq,
-				   struct clk *clk_per, struct clk *clk_ipg)
+				   struct clk *clk_per, struct clk *clk_ipg,
+				   unsigned long base_phys)
 {
 	uint32_t tctl_val;
 
@@ -365,43 +384,19 @@ static void __init _mxc_timer_init(int irq,
 	__raw_writel(tctl_val, timer_base + MXC_TCTL);
 
 	/* init and register the timer to the framework */
-	mxc_clocksource_init(clk_per);
-#ifdef CONFIG_IPIPE
-	{
-		unsigned long phys = timer_base_phys;
-		unsigned long virt = (unsigned long)timer_base;
-
-		if (timer_is_v1()) {
-			tsc_info.u.counter_paddr = phys + MX1_2_TCN;
-			tsc_info.counter_vaddr = virt + MX1_2_TCN;
-		} else {
-			tsc_info.u.counter_paddr = phys + V2_TCN;
-			tsc_info.counter_vaddr = virt + V2_TCN;
-		}
-		tsc_info.freq = clk_get_rate(clk_per);
-		__ipipe_tsc_register(&tsc_info);
-	}
-
-	mxc_itimer.irq = irq;
-	mxc_itimer.freq = clk_get_rate(clk_per);
-	mxc_itimer.min_delay_ticks = ipipe_timer_ns2ticks(&mxc_itimer, 2000);
-#endif /* CONFIG_IPIPE */
-	mxc_clockevent_init(clk_per);
-
-	/* Make irqs happen */
-	setup_irq(irq, &mxc_timer_irq);
+	mxc_clocksource_init(clk_per, base_phys);
+	mxc_clockevent_init(irq, clk_per);
 }
 
 void __init
-mxc_timer_init(void __iomem *base, unsigned long phys, int irq)
+mxc_timer_init(void __iomem *base, unsigned long base_phys, int irq)
 {
 	struct clk *clk_per = clk_get_sys("imx-gpt.0", "per");
 	struct clk *clk_ipg = clk_get_sys("imx-gpt.0", "ipg");
 
 	timer_base = base;
-	timer_base_phys = phys;
 
-	_mxc_timer_init(irq, clk_per, clk_ipg);
+	_mxc_timer_init(irq, clk_per, clk_ipg, base_phys);
 }
 
 static void __init mxc_timer_init_dt(struct device_node *np)
@@ -420,8 +415,6 @@ static void __init mxc_timer_init_dt(struct device_node *np)
 	if (of_address_to_resource(np, 0, &res))
 	    res.start = 0;
 
-	timer_base_phys = res.start;
-
 	clk_ipg = of_clk_get_by_name(np, "ipg");
 
 	/* Try osc_per first, and fall back to per otherwise */
@@ -429,7 +422,7 @@ static void __init mxc_timer_init_dt(struct device_node *np)
 	if (IS_ERR(clk_per))
 		clk_per = of_clk_get_by_name(np, "per");
 
-	_mxc_timer_init(irq, clk_per, clk_ipg);
+	_mxc_timer_init(irq, clk_per, clk_ipg, res.start);
 }
 CLOCKSOURCE_OF_DECLARE(mx1_timer, "fsl,imx1-gpt", mxc_timer_init_dt);
 CLOCKSOURCE_OF_DECLARE(mx25_timer, "fsl,imx25-gpt", mxc_timer_init_dt);

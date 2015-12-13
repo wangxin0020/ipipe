@@ -907,7 +907,7 @@ static void ipu_irq_handle(struct ipu_soc *ipu, const int *regs, int num_regs)
 			irq = irq_linear_revmap(ipu->domain,
 						regs[i] * 32 + bit);
 			if (irq)
-				ipipe_handle_demuxed_irq(irq);
+				generic_handle_irq(irq);
 		}
 	}
 }
@@ -1115,6 +1115,8 @@ static int ipu_irq_init(struct ipu_soc *ipu)
 		ct->chip.irq_ack = irq_gc_ack_set_bit;
 		ct->chip.irq_mask = irq_gc_mask_clr_bit;
 		ct->chip.irq_unmask = irq_gc_mask_set_bit;
+		ct->chip.irq_hold = irq_gc_mask_clr_ack_set_bit;
+		ct->chip.flags = IRQCHIP_PIPELINE_SAFE;
 		ct->regs.ack = IPU_INT_STAT(i / 32);
 		ct->regs.mask = IPU_INT_CTRL(i / 32);
 	}

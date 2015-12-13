@@ -51,7 +51,6 @@
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
 #include <asm/ptrace.h>
-#include <asm/exception.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/ipi.h>
@@ -62,30 +61,6 @@
  * where to place its SVC stack
  */
 struct secondary_data secondary_data;
-
-enum ipi_msg_type {
-	IPI_RESCHEDULE,
-	IPI_CALL_FUNC,
-	IPI_CPU_STOP,
-	IPI_TIMER,
-	IPI_IRQ_WORK,
-	IPI_CPU_DUMP,
-#ifdef CONFIG_IPIPE
-	IPI_IPIPE_FIRST,
-#endif /* CONFIG_IPIPE */
-};
-
-#ifdef CONFIG_IPIPE
-#define noipipe_irq_enter()			\
-	do {					\
-	} while(0)
-#define noipipe_irq_exit()			\
-	do {					\
-	} while(0)
-#else /* !CONFIG_IPIPE */
-#define noipipe_irq_enter() irq_enter()
-#define noipipe_irq_exit() irq_exit()
-#endif /* !CONFIG_IPIPE */
 
 /*
  * Boot a secondary CPU, and assign it the specified idle task.
@@ -505,7 +480,7 @@ static const char *ipi_types[NR_IPI] __tracepoint_string = {
 	S(IPI_IRQ_WORK, "IRQ work interrupts"),
 };
 
-static void smp_cross_call(const struct cpumask *target, unsigned int ipinr)
+void smp_cross_call(const struct cpumask *target, unsigned int ipinr)
 {
 	trace_ipi_raise(target, ipi_types[ipinr]);
 	__smp_cross_call(target, ipinr);
@@ -536,91 +511,6 @@ u64 smp_irq_stat_cpu(unsigned int cpu)
 	return sum;
 }
 
-#ifdef CONFIG_GENERIC_CLOCKEVENTS_BROADCAST
-
-static inline void ipi_timer(void)
-{
-#ifdef CONFIG_IPIPE
-	__ipipe_mach_update_tsc();
-#endif /* CONFIG_IPIPE */
-
-	tick_receive_broadcast();
-}
-
-#endif
-
-#ifdef CONFIG_IPIPE
-#define IPIPE_IPI_BASE	IPIPE_VIRQ_BASE
-
-unsigned __ipipe_first_ipi;
-EXPORT_SYMBOL_GPL(__ipipe_first_ipi);
-
-static void  __ipipe_do_IPI(unsigned virq, void *cookie)
-{
-	enum ipi_msg_type msg = virq - IPIPE_IPI_BASE;
-	handle_IPI(msg, raw_cpu_ptr(&ipipe_percpu.tick_regs));
-}
-
-void __ipipe_ipis_alloc(void)
-{
-	unsigned virq, _virq;
-	unsigned ipi_nr;
-
-	if (__ipipe_first_ipi)
-		return;
-
-	/* __ipipe_first_ipi is 0 here  */
-	ipi_nr = IPI_IPIPE_FIRST + IPIPE_LAST_IPI + 1;
-
-	for (virq = IPIPE_IPI_BASE; virq < IPIPE_IPI_BASE + ipi_nr; virq++) {
-		_virq = ipipe_alloc_virq();
-		if (virq != _virq)
-			panic("I-pipe: cannot reserve virq #%d (got #%d)\n",
-			      virq, _virq);
-
-		if (virq - IPIPE_IPI_BASE == IPI_IPIPE_FIRST)
-			__ipipe_first_ipi = virq;
-	}
-}
-
-void __ipipe_ipis_request(void)
-{
-	unsigned virq;
-
-	for (virq = IPIPE_IPI_BASE; virq < __ipipe_first_ipi; virq++)
-		ipipe_request_irq(ipipe_root_domain,
-				  virq,
-				  (ipipe_irq_handler_t)__ipipe_do_IPI,
-				  NULL, NULL);
-}
-void ipipe_send_ipi(unsigned ipi, cpumask_t cpumask)
-{
-	enum ipi_msg_type msg = ipi - IPIPE_IPI_BASE;
-	smp_cross_call(&cpumask, msg);
-}
-EXPORT_SYMBOL_GPL(ipipe_send_ipi);
-
- /* hw IRQs off */
-asmlinkage void __exception __ipipe_grab_ipi(unsigned svc, struct pt_regs *regs)
-{
-	int virq = IPIPE_IPI_BASE + svc;
-
-	/*
-	 * Virtual NMIs ignore the root domain's stall
-	 * bit. When caught over high priority
-	 * domains, virtual VMIs are pipelined the
-	 * usual way as normal interrupts.
-	 */
-	if (virq == IPIPE_SERVICE_VNMI && __ipipe_root_p)
-		__ipipe_do_vnmi(IPIPE_SERVICE_VNMI, NULL);
-	else
-		__ipipe_dispatch_irq(virq, IPIPE_IRQF_NOACK);
-
-	__ipipe_exit_irq(regs);
-}
-
-#endif /* CONFIG_IPIPE */
-
 void arch_send_call_function_ipi_mask(const struct cpumask *mask)
 {
 	smp_cross_call(mask, IPI_CALL_FUNC);
@@ -640,6 +530,67 @@ void arch_irq_work_raise(void)
 #endif
 
 static DEFINE_RAW_SPINLOCK(stop_lock);
+
+#ifdef CONFIG_IRQ_PIPELINE
+
+static struct irq_domain *ipim_domain;
+
+static void ipim_irq_noop(struct irq_data *data) { }
+
+static unsigned int ipim_irq_noop_ret(struct irq_data *data)
+{
+	return 0;
+}
+
+void handle_ipim_irq(unsigned int irq, struct irq_desc *desc) { }
+
+static struct irq_chip ipim_chip = {
+	.name		= "IPI mapper",
+	.irq_startup	= ipim_irq_noop_ret,
+	.irq_shutdown	= ipim_irq_noop,
+	.irq_enable	= ipim_irq_noop,
+	.irq_disable	= ipim_irq_noop,
+	.irq_ack	= ipim_irq_noop,
+	.irq_mask	= ipim_irq_noop,
+	.irq_unmask	= ipim_irq_noop,
+	.flags		= IRQCHIP_PIPELINE_SAFE | IRQCHIP_SKIP_SET_WAKE,
+};
+
+static int ipim_irq_map(struct irq_domain *d, unsigned int irq,
+			 irq_hw_number_t hwirq)
+{
+	irq_set_chip_and_handler(irq, &ipim_chip, handle_ipim_irq);
+
+	return 0;
+}
+
+static struct irq_domain_ops ipim_domain_ops = {
+	.map	= ipim_irq_map,
+};
+
+void smp_create_ipi_domain(void)
+{
+	/*
+	 * Create an IRQ domain for mapping all IPIs, with fixed virq
+	 * numbers starting from NR_IRQS onward. The virqs obtained
+	 * can be injected into the pipeline upon IPI receipt like
+	 * other interrupts.
+	 */
+	ipim_domain = irq_domain_add_simple(NULL, NR_IPI, IPIPE_IPI_BASE,
+					    &ipim_domain_ops, NULL);
+}
+
+static inline
+void handle_IPI_pipelined(int ipinr, struct pt_regs *regs)
+{
+	__irq_pipeline_enter(ipinr + IPIPE_IPI_BASE, regs);
+}
+
+#else
+
+static inline void handle_IPI_pipelined(int ipinr, struct pt_regs *regs) { }
+
+#endif /* CONFIG_IRQ_PIPELINE */
 
 /*
  * ipi_cpu_stop - handle IPI from smp_send_stop()
@@ -665,7 +616,7 @@ static void ipi_cpu_stop(unsigned int cpu)
 /*
  * Main handler for inter-processor interrupts
  */
-void handle_IPI(int ipinr, struct pt_regs *regs)
+void __handle_IPI(int ipinr, struct pt_regs *regs)
 {
 	unsigned int cpu = smp_processor_id();
 	struct pt_regs *old_regs = set_irq_regs(regs);
@@ -681,22 +632,22 @@ void handle_IPI(int ipinr, struct pt_regs *regs)
 		break;
 
 	case IPI_CALL_FUNC:
-		noipipe_irq_enter();
+		irq_enter();
 		generic_smp_call_function_interrupt();
-		noipipe_irq_exit();
+		irq_exit();
 		break;
 
 	case IPI_CPU_STOP:
-		noipipe_irq_enter();
+		irq_enter();
 		ipi_cpu_stop(cpu);
-		noipipe_irq_exit();
+		irq_exit();
 		break;
 
 #ifdef CONFIG_GENERIC_CLOCKEVENTS_BROADCAST
 	case IPI_TIMER:
-		noipipe_irq_enter();
+		irq_enter();
 		tick_receive_broadcast();
-		noipipe_irq_exit();
+		irq_exit();
 		break;
 #endif
 
@@ -716,6 +667,14 @@ void handle_IPI(int ipinr, struct pt_regs *regs)
 	if ((unsigned)ipinr < NR_IPI)
 		trace_ipi_exit_rcuidle(ipi_types[ipinr]);
 	set_irq_regs(old_regs);
+}
+
+void handle_IPI(int ipinr, struct pt_regs *regs)
+{
+	if (irqs_pipelined())
+		handle_IPI_pipelined(ipinr, regs);
+	else
+		__handle_IPI(ipinr, regs);
 }
 
 void smp_send_reschedule(int cpu)

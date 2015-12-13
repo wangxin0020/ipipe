@@ -15,7 +15,6 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
-#include <asm/ipipe.h>
 
 #include <asm/exception.h>
 #include <asm/mach/irq.h>
@@ -267,7 +266,7 @@ out:
 		irqnr &= ACTIVEIRQ_MASK;
 
 		if (irqnr) {
-			ipipe_handle_domain_irq(domain, irqnr, regs);
+			handle_domain_irq(domain, irqnr, regs);
 			handled_irq = 1;
 		}
 	} while (irqnr);

@@ -201,15 +201,9 @@ i##n:								\
 	EXC_XFER_TEMPLATE(n, hdlr, n, NOCOPY, transfer_to_handler_full,	\
 			  ret_from_except_full)
 
-#ifdef CONFIG_IPIPE
-#define EXC_XFER_IPIPE(n, hdlr)		\
-	EXC_XFER_TEMPLATE(n, hdlr, n+1, NOCOPY, transfer_to_handler, \
-			  __ipipe_ret_from_except)
-#endif /* CONFIG_IPIPE */
-
 #define EXC_XFER_LITE(n, hdlr)		\
 	EXC_XFER_TEMPLATE(n, hdlr, n+1, NOCOPY, transfer_to_handler, \
-			  ret_from_except)
+			  ret_from_interrupt)
 
 #define EXC_XFER_EE(n, hdlr)		\
 	EXC_XFER_TEMPLATE(n, hdlr, n, COPY_EE, transfer_to_handler_full, \
@@ -248,11 +242,7 @@ DataAccess:
 InstructionAccess:
 
 /* External interrupt */
-#ifdef CONFIG_IPIPE
-	EXCEPTION(0x500, HardwareInterrupt, __ipipe_grab_irq, EXC_XFER_IPIPE)
-#else /* !CONFIG_IPIPE */
 	EXCEPTION(0x500, HardwareInterrupt, do_IRQ, EXC_XFER_LITE)
-#endif /* CONFIG_IPIPE */
 
 /* Alignment exception */
 	. = 0x600
@@ -275,11 +265,7 @@ Alignment:
 	EXCEPTION(0x800, FPUnavailable, unknown_exception, EXC_XFER_STD)
 
 /* Decrementer */
-#ifdef CONFIG_IPIPE
-	EXCEPTION(0x900, Decrementer, __ipipe_grab_timer, EXC_XFER_IPIPE)
-#else /* !CONFIG_IPIPE */
 	EXCEPTION(0x900, Decrementer, timer_interrupt, EXC_XFER_LITE)
-#endif /* CONFIG_IPIPE */
 
 	EXCEPTION(0xa00, Trap_0a, unknown_exception, EXC_XFER_EE)
 	EXCEPTION(0xb00, Trap_0b, unknown_exception, EXC_XFER_EE)

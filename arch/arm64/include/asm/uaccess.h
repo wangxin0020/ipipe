@@ -25,7 +25,7 @@
 #include <linux/thread_info.h>
 
 #include <asm/ptrace.h>
-#include <linux/ipipe.h>
+#include <linux/irq_pipeline.h>
 #include <asm/errno.h>
 #include <asm/memory.h>
 #include <asm/compiler.h>

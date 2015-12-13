@@ -20,7 +20,6 @@
 #include <linux/clockchips.h>
 #include <linux/clk.h>
 #include <linux/stringify.h>
-#include <linux/ipipe.h>
 #include <linux/atmel_tc.h>
 #include <linux/ioport.h>
 #include <linux/io.h>

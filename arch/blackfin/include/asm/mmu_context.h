@@ -213,10 +213,4 @@ static inline void destroy_context(struct mm_struct *mm)
 #define ipipe_switch_mm_head(prev, next, tsk) \
 	__switch_mm(prev, next, tsk)
 
-#define ipipe_mm_switch_protect(flags)		\
-	flags = hard_cond_local_irq_save()
-
-#define ipipe_mm_switch_unprotect(flags)	\
-	hard_cond_local_irq_restore(flags)
-
 #endif

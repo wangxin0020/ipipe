@@ -18,7 +18,6 @@
 #include <linux/sched.h>
 #include <linux/syscore_ops.h>
 #include <asm/delay.h>
-#include <linux/ipipe.h>
 #include <asm/traps.h>
 #include <asm/blackfin.h>
 #include <asm/gpio.h>
@@ -101,6 +100,93 @@ static void __init search_IAR(void)
 }
 #endif
 
+static int irq_lvdepth[IVG15 + 1];
+
+static unsigned long irq_lvmask = bfin_no_irqs;
+
+unsigned long mute_low_priority_irqs(void)
+{
+	/*
+	 * This code is called by the ins{bwl} routines (see
+	 * arch/blackfin/lib/ins.S), which are heavily used by the
+	 * network stack. It mutes all interrupts but those marked has
+	 * having high priority, so that we keep decent network
+	 * transfer rates for Linux without inducing pathological
+	 * jitter for the real-time domain.
+	 */
+	bfin_sti(irq_lvmask);
+	return __test_and_set_bit(IPIPE_STALL_FLAG, &irq_root_status) ?
+		bfin_no_irqs : bfin_irq_flags;
+}
+
+void unmute_low_priority_irqs(unsigned long flags)
+{
+	if (flags != bfin_no_irqs)
+		__clear_bit(IPIPE_STALL_FLAG, &irq_root_status);
+
+	bfin_sti(bfin_irq_flags);
+}
+
+static int get_irq_priority(unsigned int irq)
+{
+	int ient __maybe_unused, prio __maybe_unused;
+
+	if (irq <= IRQ_CORETMR)
+		return irq;
+
+#ifdef SEC_GCTL
+	/*
+	 * XXX: The SEC directs all system interrupts to core
+	 * IVG11. This basically disables the optimization on 60x...
+	 */
+	if (irq >= BFIN_IRQ(0))
+		return IVG11;
+#else
+	for (ient = 0; ient < NR_PERI_INTS; ient++) {
+		struct ivgx *ivg = ivg_table + ient;
+		if (ivg->irqno == irq) {
+			for (prio = 0; prio <= IVG13-IVG7; prio++) {
+				if (ivg7_13[prio].ifirst <= ivg &&
+				    ivg7_13[prio].istop > ivg)
+					return IVG7 + prio;
+			}
+		}
+	}
+#endif
+
+	return IVG15;
+}
+
+static unsigned int bfin_startup_irq(struct irq_data *d)
+{
+	struct irq_chip *chip = irq_data_get_irq_chip(d);
+	int prio;
+
+	if (irqd_has_highpri(d)) {
+		prio = get_irq_priority(d->irq);
+		if (++irq_lvdepth[prio] == 1)
+			irq_lvmask |= (1 << prio);
+	}
+
+	chip->irq_unmask(d);
+
+	return 0;
+}
+
+static void bfin_shutdown_irq(struct irq_data *d)
+{
+	struct irq_chip *chip = irq_data_get_irq_chip(d);
+	int prio;
+
+	if (irqd_has_highpri(d)) {
+		prio = get_irq_priority(d->irq);
+		if (--irq_lvdepth[prio] == 0)
+			irq_lvmask &= ~(1 << prio);
+	}
+
+	chip->irq_mask(d);
+}
+
 /*
  * This is for core internal IRQs
  */
@@ -136,7 +222,6 @@ static void bfin_core_unmask_irq(struct irq_data *d)
 #ifndef SEC_GCTL
 void bfin_internal_mask_irq(unsigned int irq)
 {
-	unsigned long flags = hard_local_irq_save();
 #ifdef SIC_IMASK0
 	unsigned mask_bank = BFIN_SYSIRQ(irq) / 32;
 	unsigned mask_bit = BFIN_SYSIRQ(irq) % 32;
@@ -150,7 +235,6 @@ void bfin_internal_mask_irq(unsigned int irq)
 	bfin_write_SIC_IMASK(bfin_read_SIC_IMASK() &
 			~(1 << BFIN_SYSIRQ(irq)));
 #endif /* end of SIC_IMASK0 */
-	hard_local_irq_restore(flags);
 }
 
 static void bfin_internal_mask_irq_chip(struct irq_data *d)
@@ -165,8 +249,6 @@ void bfin_internal_unmask_irq_affinity(unsigned int irq,
 void bfin_internal_unmask_irq(unsigned int irq)
 #endif
 {
-	unsigned long flags = hard_local_irq_save();
-
 #ifdef SIC_IMASK0
 	unsigned mask_bank = BFIN_SYSIRQ(irq) / 32;
 	unsigned mask_bit = BFIN_SYSIRQ(irq) % 32;
@@ -186,7 +268,6 @@ void bfin_internal_unmask_irq(unsigned int irq)
 	bfin_write_SIC_IMASK(bfin_read_SIC_IMASK() |
 			(1 << BFIN_SYSIRQ(irq)));
 #endif
-	hard_local_irq_restore(flags);
 }
 
 #ifdef CONFIG_SMP
@@ -214,7 +295,6 @@ static void bfin_internal_unmask_irq_chip(struct irq_data *d)
 int bfin_internal_set_wake(unsigned int irq, unsigned int state)
 {
 	u32 bank, bit, wakeup = 0;
-	unsigned long flags;
 	bank = BFIN_SYSIRQ(irq) / 32;
 	bit = BFIN_SYSIRQ(irq) % 32;
 
@@ -248,8 +328,6 @@ int bfin_internal_set_wake(unsigned int irq, unsigned int state)
 	break;
 	}
 
-	flags = hard_local_irq_save();
-
 	if (state) {
 		bfin_sic_iwr[bank] |= (1 << bit);
 		vr_wakeup  |= wakeup;
@@ -258,8 +336,6 @@ int bfin_internal_set_wake(unsigned int irq, unsigned int state)
 		bfin_sic_iwr[bank] &= ~(1 << bit);
 		vr_wakeup  &= ~wakeup;
 	}
-
-	hard_local_irq_restore(flags);
 
 	return 0;
 }
@@ -277,103 +353,50 @@ inline int bfin_internal_set_wake(unsigned int irq, unsigned int state)
 #endif
 
 #else /* SEC_GCTL */
-static void bfin_sec_mask_ack_irq(struct irq_data *d)
-{
-	unsigned int sid = BFIN_SYSIRQ(d->irq);
-	bfin_write_SEC_SCI(0, SEC_CSID, sid);
-}
-
 static void bfin_sec_mask_irq(struct irq_data *d)
 {
-	unsigned long flags = hard_local_irq_save();
 	unsigned int sid = BFIN_SYSIRQ(d->irq);
-
 	bfin_write_SEC_SCI(0, SEC_CSID, sid);
-	ipipe_lock_irq(d->irq);
-
-	hard_local_irq_restore(flags);
 }
 
 static void bfin_sec_unmask_irq(struct irq_data *d)
 {
-	unsigned long flags = hard_local_irq_save();
-	unsigned int sid = BFIN_SYSIRQ(d->irq);
-
-	bfin_write32(SEC_END, sid);
-	ipipe_unlock_irq(d->irq);
-
-	hard_local_irq_restore(flags);
-}
-
-#ifdef CONFIG_IPIPE
-
-static void bfin_sec_eoi_irq(struct irq_data *d)
-{
-	/* nop */
-}
-
-static void bfin_sec_hold_irq(struct irq_data *d)
-{
-	unsigned int sid = BFIN_SYSIRQ(d->irq);
-	bfin_write_SEC_SCI(0, SEC_CSID, sid);
-}
-
-static void bfin_sec_release_irq(struct irq_data *d)
-{
 	unsigned int sid = BFIN_SYSIRQ(d->irq);
 	bfin_write32(SEC_END, sid);
 }
-
-#else  /* !CONFIG_IPIPE */
 
 static void bfin_sec_preflow_handler(struct irq_data *d)
 {
-	unsigned long flags = hard_local_irq_save();
 	unsigned int sid = BFIN_SYSIRQ(d->irq);
-
 	bfin_write_SEC_SCI(0, SEC_CSID, sid);
-
-	hard_local_irq_restore(flags);
 }
-
-#endif	/* !CONFIG_IPIPE */
 
 static void bfin_sec_enable_ssi(unsigned int sid)
 {
-	unsigned long flags = hard_local_irq_save();
 	uint32_t reg_sctl = bfin_read_SEC_SCTL(sid);
 
 	reg_sctl |= SEC_SCTL_SRC_EN;
 	bfin_write_SEC_SCTL(sid, reg_sctl);
-
-	hard_local_irq_restore(flags);
 }
 
 static void bfin_sec_disable_ssi(unsigned int sid)
 {
-	unsigned long flags = hard_local_irq_save();
 	uint32_t reg_sctl = bfin_read_SEC_SCTL(sid);
 
 	reg_sctl &= ((uint32_t)~SEC_SCTL_SRC_EN);
 	bfin_write_SEC_SCTL(sid, reg_sctl);
-
-	hard_local_irq_restore(flags);
 }
 
 static void bfin_sec_set_ssi_coreid(unsigned int sid, unsigned int coreid)
 {
-	unsigned long flags = hard_local_irq_save();
 	uint32_t reg_sctl = bfin_read_SEC_SCTL(sid);
 
 	reg_sctl &= ((uint32_t)~SEC_SCTL_CTG);
 	bfin_write_SEC_SCTL(sid, reg_sctl | ((coreid << 20) & SEC_SCTL_CTG));
-
-	hard_local_irq_restore(flags);
 }
 
 static void bfin_sec_enable_sci(unsigned int sid)
 {
-	unsigned long flags = hard_local_irq_save();
 	uint32_t reg_sctl = bfin_read_SEC_SCTL(sid);
 
 	if (sid == BFIN_SYSIRQ(IRQ_WATCH0))
@@ -381,46 +404,34 @@ static void bfin_sec_enable_sci(unsigned int sid)
 	else
 		reg_sctl |= SEC_SCTL_INT_EN;
 	bfin_write_SEC_SCTL(sid, reg_sctl);
-
-	hard_local_irq_restore(flags);
 }
 
 static void bfin_sec_disable_sci(unsigned int sid)
 {
-	unsigned long flags = hard_local_irq_save();
 	uint32_t reg_sctl = bfin_read_SEC_SCTL(sid);
 
 	reg_sctl &= ((uint32_t)~SEC_SCTL_INT_EN);
 	bfin_write_SEC_SCTL(sid, reg_sctl);
-
-	hard_local_irq_restore(flags);
 }
 
 static void bfin_sec_enable(struct irq_data *d)
 {
-	unsigned long flags = hard_local_irq_save();
 	unsigned int sid = BFIN_SYSIRQ(d->irq);
 
 	bfin_sec_enable_sci(sid);
 	bfin_sec_enable_ssi(sid);
-
-	hard_local_irq_restore(flags);
 }
 
 static void bfin_sec_disable(struct irq_data *d)
 {
-	unsigned long flags = hard_local_irq_save();
 	unsigned int sid = BFIN_SYSIRQ(d->irq);
 
 	bfin_sec_disable_sci(sid);
 	bfin_sec_disable_ssi(sid);
-
-	hard_local_irq_restore(flags);
 }
 
 static void bfin_sec_set_priority(unsigned int sec_int_levels, u8 *sec_int_priority)
 {
-	unsigned long flags = hard_local_irq_save();
 	uint32_t reg_sctl;
 	int i;
 
@@ -431,18 +442,13 @@ static void bfin_sec_set_priority(unsigned int sec_int_levels, u8 *sec_int_prior
 		reg_sctl |= sec_int_priority[i] << SEC_SCTL_PRIO_OFFSET;
 		bfin_write_SEC_SCTL(i, reg_sctl);
 	}
-
-	hard_local_irq_restore(flags);
 }
 
 void bfin_sec_raise_irq(unsigned int irq)
 {
-	unsigned long flags = hard_local_irq_save();
 	unsigned int sid = BFIN_SYSIRQ(irq);
 
 	bfin_write32(SEC_RAISE, sid);
-
-	hard_local_irq_restore(flags);
 }
 
 static void init_software_driven_irq(void)
@@ -552,6 +558,10 @@ static struct irq_chip bfin_core_irqchip = {
 	.name = "CORE",
 	.irq_mask = bfin_core_mask_irq,
 	.irq_unmask = bfin_core_unmask_irq,
+	.irq_hold = bfin_core_mask_irq,
+	.irq_startup = bfin_startup_irq,
+	.irq_shutdown = bfin_shutdown_irq,
+	.flags = IRQCHIP_PIPELINE_SAFE,
 };
 
 #ifndef SEC_GCTL
@@ -561,32 +571,33 @@ static struct irq_chip bfin_internal_irqchip = {
 	.irq_unmask = bfin_internal_unmask_irq_chip,
 	.irq_disable = bfin_internal_mask_irq_chip,
 	.irq_enable = bfin_internal_unmask_irq_chip,
+	.irq_hold = bfin_internal_mask_irq_chip,
+	.irq_startup = bfin_startup_irq,
+	.irq_shutdown = bfin_shutdown_irq,
 #ifdef CONFIG_SMP
 	.irq_set_affinity = bfin_internal_set_affinity,
 #endif
 	.irq_set_wake = bfin_internal_set_wake_chip,
+	.flags = IRQCHIP_PIPELINE_SAFE,
 };
 #else
 static struct irq_chip bfin_sec_irqchip = {
 	.name = "SEC",
-	.irq_mask_ack = bfin_sec_mask_ack_irq,
 	.irq_mask = bfin_sec_mask_irq,
 	.irq_unmask = bfin_sec_unmask_irq,
 	.irq_disable = bfin_sec_disable,
 	.irq_enable = bfin_sec_enable,
-#ifdef CONFIG_IPIPE
-	.irq_eoi = bfin_sec_eoi_irq,
-	.irq_hold = bfin_sec_hold_irq,
-	.irq_release = bfin_sec_release_irq,
-#else
+	.irq_hold = bfin_sec_mask_irq,
 	.irq_eoi = bfin_sec_unmask_irq,
-#endif
+	.irq_startup = bfin_startup_irq,
+	.irq_shutdown = bfin_shutdown_irq,
+	.flags = IRQCHIP_PIPELINE_SAFE,
 };
 #endif
 
 void bfin_handle_irq(unsigned irq)
 {
-	ipipe_handle_demuxed_irq(irq);
+	generic_handle_irq(irq);
 }
 
 #if defined(CONFIG_BFIN_MAC) || defined(CONFIG_BFIN_MAC_MODULE)
@@ -680,7 +691,11 @@ static struct irq_chip bfin_mac_status_irqchip = {
 	.name = "MACST",
 	.irq_mask = bfin_mac_status_mask_irq,
 	.irq_unmask = bfin_mac_status_unmask_irq,
+	.irq_hold = bfin_mac_status_mask_irq,
 	.irq_set_wake = bfin_mac_status_set_wake,
+	.irq_startup = bfin_startup_irq,
+	.irq_shutdown = bfin_shutdown_irq,
+	.flags = IRQCHIP_PIPELINE_SAFE,
 };
 
 void bfin_demux_mac_status_irq(unsigned int int_err_irq,
@@ -761,7 +776,7 @@ static unsigned int bfin_gpio_irq_startup(struct irq_data *d)
 	if (__test_and_set_bit(gpionr, gpio_enabled))
 		bfin_gpio_irq_prepare(gpionr);
 
-	bfin_gpio_unmask_irq(d);
+	bfin_startup_irq(d);
 
 	return 0;
 }
@@ -770,7 +785,7 @@ static void bfin_gpio_irq_shutdown(struct irq_data *d)
 {
 	u32 gpionr = irq_to_gpio(d->irq);
 
-	bfin_gpio_mask_irq(d);
+	bfin_shutdown_irq(d);
 	__clear_bit(gpionr, gpio_enabled);
 	bfin_gpio_irq_free(gpionr);
 }
@@ -922,12 +937,14 @@ static struct irq_chip bfin_gpio_irqchip = {
 	.irq_mask = bfin_gpio_mask_irq,
 	.irq_mask_ack = bfin_gpio_mask_ack_irq,
 	.irq_unmask = bfin_gpio_unmask_irq,
+	.irq_hold = bfin_gpio_mask_ack_irq,
 	.irq_disable = bfin_gpio_mask_irq,
 	.irq_enable = bfin_gpio_unmask_irq,
 	.irq_set_type = bfin_gpio_irq_type,
 	.irq_startup = bfin_gpio_irq_startup,
 	.irq_shutdown = bfin_gpio_irq_shutdown,
 	.irq_set_wake = bfin_gpio_set_wake,
+	.flags = IRQCHIP_PIPELINE_SAFE,
 };
 
 #endif
@@ -1286,67 +1303,36 @@ void do_irq(int vec, struct pt_regs *fp)
 
 #ifdef CONFIG_IPIPE
 
-int __ipipe_get_irq_priority(unsigned int irq)
+static void __enter_irq_pipeline(unsigned int irq, struct pt_regs *regs)
 {
-	int ient __maybe_unused, prio __maybe_unused;
+	struct irq_stage_data *p = irq_root_this_context();
+	int flags, s = -1;
 
-	if (irq <= IRQ_CORETMR)
-		return irq;
+	if (raw_cpu_read(__ipipe_defer_root_sync))
+ 		s = __test_and_set_bit(IPIPE_STALL_FLAG, &p->status);
 
-#ifdef SEC_GCTL
-	/*
-	 * XXX: The SEC directs all system interrupts to core
-	 * IVG11. This basically disables the optimization on 60x...
-	 */
-	if (irq >= BFIN_IRQ(0))
-		return IVG11;
-#else
-	for (ient = 0; ient < NR_PERI_INTS; ient++) {
-		struct ivgx *ivg = ivg_table + ient;
-		if (ivg->irqno == irq) {
-			for (prio = 0; prio <= IVG13-IVG7; prio++) {
-				if (ivg7_13[prio].ifirst <= ivg &&
-				    ivg7_13[prio].istop > ivg)
-					return IVG7 + prio;
-			}
-		}
-	}
-#endif
+	if (irq != IRQ_SYSTMR && irq != IRQ_CORETMR)
+		irq_pipeline_enter(irq, regs);
+	else
+		__irq_pipeline_enter(irq, regs);
 
-	return IVG15;
-}
-
-static inline int mayday_pending(struct pt_regs *regs)
-{
-	return user_mode(regs) && ipipe_test_thread_flag(TIP_MAYDAY);
+	if (s == 0)
+ 		__clear_bit(IPIPE_STALL_FLAG, &p->status);
 }
 
 /* Hw interrupts are disabled on entry (check SAVE_CONTEXT). */
 #ifdef CONFIG_DO_IRQ_L1
 __attribute__((l1_text))
 #endif
-asmlinkage int __ipipe_grab_irq(int vec, struct pt_regs *regs)
+asmlinkage int enter_irq_pipeline(int vec, struct pt_regs *regs)
 {
-	struct ipipe_percpu_domain_data *p = ipipe_this_cpu_root_context();
-	struct ipipe_percpu_data *q = __ipipe_raw_cpu_ptr(&ipipe_percpu);
-	struct ipipe_domain *this_domain = __ipipe_current_domain;
-	struct pt_regs *tick_regs;
+	struct irq_stage *this_stage = __current_irq_stage;
+	struct irq_stage_data *p = irq_root_this_context();
 	int irq, s = 0;
 
 	irq = vec_to_irq(vec);
 	if (irq == -1)
 		return 0;
-
-	if (irq == q->hrtimer_irq || q->hrtimer_irq == -1) {
-		/* This is basically what we need from the register frame. */
-		tick_regs = &q->tick_regs;
-		tick_regs->ipend = regs->ipend;
-		tick_regs->pc = regs->pc;
-		if (this_domain != ipipe_root_domain)
-			tick_regs->ipend &= ~0x10;
-		else
-			tick_regs->ipend |= 0x10;
-	}
 
 	/*
 	 * We don't want Linux interrupt handlers to run at the
@@ -1354,8 +1340,8 @@ asmlinkage int __ipipe_grab_irq(int vec, struct pt_regs *regs)
 	 * might delay other interrupts handled by a high priority
 	 * domain. Here is what we do instead:
 	 *
-	 * - we raise the SYNCDEFER bit to prevent
-	 * __ipipe_handle_irq() to sync the pipeline for the root
+	 * - we raise the __ipipe_defer_root_sync flag to prevent
+	 * __enter_irq_pipeline() to sync the pipeline for the root
 	 * stage for the incoming interrupt. Upon return, that IRQ is
 	 * pending in the interrupt log.
 	 *
@@ -1363,25 +1349,18 @@ asmlinkage int __ipipe_grab_irq(int vec, struct pt_regs *regs)
 	 * that _schedule_and_signal_from_int will eventually sync the
 	 * pipeline from EVT15.
 	 */
-	if (this_domain == ipipe_root_domain) {
-		s = __test_and_set_bit(IPIPE_SYNCDEFER_FLAG, &p->status);
-		barrier();
+	if (this_stage == &root_irq_stage) {
+		s = raw_cpu_read(__ipipe_defer_root_sync);
+		raw_cpu_write(__ipipe_defer_root_sync, 1);
 	}
 
-	ipipe_trace_irq_entry(irq);
-	__ipipe_handle_irq(irq, regs);
-	ipipe_trace_irq_exit(irq);
+	__enter_irq_pipeline(irq, regs);
 
-	if (mayday_pending(regs)) {
-		ipipe_clear_thread_flag(TIP_MAYDAY);
-		__ipipe_notify_trap(IPIPE_TRAP_MAYDAY, regs);
-	}
-
-	if (this_domain == ipipe_root_domain) {
+	if (this_stage == &root_irq_stage) {
 		set_thread_flag(TIF_IRQ_SYNC);
 		if (s == 0) {
-			__clear_bit(IPIPE_SYNCDEFER_FLAG, &p->status);
-			return !test_bit(IPIPE_STALL_FLAG, &p->status);
+			raw_cpu_write(__ipipe_defer_root_sync, 0);
+ 			return !test_bit(IPIPE_STALL_FLAG, &p->status);
 		}
 	}
 

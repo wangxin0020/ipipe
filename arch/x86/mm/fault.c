@@ -1068,11 +1068,8 @@ __do_page_fault(struct pt_regs *regs, unsigned long error_code,
 	tsk = current;
 	mm = tsk->mm;
 
-#ifdef CONFIG_IPIPE
-	if (ipipe_root_domain != ipipe_head_domain)
+	if (irqs_pipelined() && &root_irq_stage != head_irq_stage)
 		hard_cond_local_irq_enable();
-#endif
-
 	/*
 	 * Detect and handle instructions that would cause a page fault for
 	 * both a tracked kernel page and a userspace page.
@@ -1311,17 +1308,26 @@ ___do_page_fault(struct pt_regs *regs, unsigned long error_code)
 dotraplinkage int notrace
 do_page_fault(struct pt_regs *regs, unsigned long error_code)
 {
-	return IPIPE_DO_TRAP(___do_page_fault, X86_TRAP_PF, regs, error_code);
+	return handle_trap(___do_page_fault, X86_TRAP_PF, regs, error_code);
 }
 
 NOKPROBE_SYMBOL(do_page_fault);
 
-#ifdef CONFIG_IPIPE
-void __ipipe_pin_mapping_globally(unsigned long start, unsigned long end)
+#ifdef CONFIG_FORCE_COMMIT_MEMORY
+
+void arch_pin_mapping_globally(unsigned long start, unsigned long end)
 {
-#ifdef CONFIG_X86_32
 	unsigned long next, addr = start;
 
+	/*
+	 * APEI may invoke this for temporarily remapping pages in
+	 * interrupt context - nothing we can and need to propagate
+	 * globally.
+	 */
+	if (in_interrupt())
+		return;
+
+#ifdef CONFIG_X86_32
 	do {
 		unsigned long flags;
 		struct page *page;
@@ -1334,27 +1340,28 @@ void __ipipe_pin_mapping_globally(unsigned long start, unsigned long end)
 
 	} while (addr = next, addr != end);
 #else
-	unsigned long next, addr = start;
-	int ret = 0;
-
 	do {
 		struct page *page;
+		pgd_t *pgd;
+		int ret;
 
 		next = pgd_addr_end(addr, end);
 		spin_lock(&pgd_lock);
 		list_for_each_entry(page, &pgd_list, lru) {
-			pgd_t *pgd;
 			pgd = (pgd_t *)page_address(page) + pgd_index(addr);
 			ret = vmalloc_sync_one(pgd, addr);
-			if (ret)
-				break;
+			if (ret) {
+				spin_unlock(&pgd_lock);
+				return;
+			}
 		}
 		spin_unlock(&pgd_lock);
 		addr = next;
-	} while (!ret && addr != end);
+	} while (addr != end);
 #endif
 }
-#endif /* CONFIG_IPIPE */
+
+#endif /* CONFIG_FORCE_COMMIT_MEMORY */
 
 #ifdef CONFIG_TRACING
 static nokprobe_inline void
@@ -1388,7 +1395,7 @@ __trace_do_page_fault(struct pt_regs *regs, unsigned long error_code)
 dotraplinkage int notrace
 trace_do_page_fault(struct pt_regs *regs, unsigned long error_code)
 {
-	return IPIPE_DO_TRAP(__trace_do_page_fault, X86_TRAP_PF, regs, error_code);
+	return handle_trap(__trace_do_page_fault, X86_TRAP_PF, regs, error_code);
 }
 NOKPROBE_SYMBOL(trace_do_page_fault);
 #endif /* CONFIG_TRACING */

@@ -215,7 +215,7 @@ void ptrace_break(struct task_struct *tsk, struct pt_regs *regs)
 static int break_trap(struct pt_regs *regs, unsigned int instr)
 {
 
-	if (__ipipe_report_trap(IPIPE_TRAP_BREAK,regs))
+	if (dovetail_trap(IPIPE_TRAP_BREAK, regs))
 		return 0;
 
 	ptrace_break(current, regs);

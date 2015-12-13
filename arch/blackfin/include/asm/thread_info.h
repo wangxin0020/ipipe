@@ -28,7 +28,7 @@
 
 #ifndef __ASSEMBLY__
 
-#include <ipipe/thread_info.h>
+#include <dovetail/thread_info.h>
 
 typedef unsigned long mm_segment_t;
 
@@ -40,16 +40,14 @@ typedef unsigned long mm_segment_t;
 struct thread_info {
 	struct task_struct *task;	/* main task structure */
 	unsigned long flags;	/* low level flags */
+	__u32 local_flags;	/* local (synchronous) flags */
 	int cpu;		/* cpu we're on */
 	int preempt_count;	/* 0 => preemptable, <0 => BUG */
 	mm_segment_t addr_limit;	/* address limit */
-#ifdef CONFIG_IPIPE
-	unsigned long ipipe_flags;
-#endif
-	struct ipipe_threadinfo ipipe_data;
 #ifndef CONFIG_SMP
 	struct l1_scratch_task_info l1_task_info;
 #endif
+	struct dovetail_thread_state dovetail_state;
 };
 
 /*
@@ -59,6 +57,7 @@ struct thread_info {
 {						\
 	.task		= &tsk,			\
 	.flags		= 0,			\
+	.local_flags	= 0,			\
 	.cpu		= 0,			\
 	.preempt_count	= INIT_PREEMPT_COUNT,	\
 }
@@ -90,6 +89,7 @@ static inline struct thread_info *current_thread_info(void)
 #define TIF_IRQ_SYNC		7	/* sync pipeline stage */
 #define TIF_NOTIFY_RESUME	8	/* callback before returning to user */
 #define TIF_SINGLESTEP		9
+#define TIF_MAYDAY		10	/* emergency trap pending */
 
 /* as above, but as bit values */
 #define _TIF_SYSCALL_TRACE	(1<<TIF_SYSCALL_TRACE)
@@ -98,17 +98,17 @@ static inline struct thread_info *current_thread_info(void)
 #define _TIF_IRQ_SYNC		(1<<TIF_IRQ_SYNC)
 #define _TIF_NOTIFY_RESUME	(1<<TIF_NOTIFY_RESUME)
 #define _TIF_SINGLESTEP		(1<<TIF_SINGLESTEP)
+#define _TIF_MAYDAY		(1<<TIF_MAYDAY)
 
 #define _TIF_WORK_MASK		0x0000FFFE	/* work to do on interrupt/exception return */
 
-/* ti->ipipe_flags */
-#define TIP_MAYDAY	0	/* MAYDAY call is pending */
-#define TIP_NOTIFY	1	/* Notify head domain about kernel events */
-#define TIP_HEAD	2	/* Runs in head domain */
+/* Local (synchronous) thread flags. */
 
-#define _TIP_MAYDAY	(1<<TIP_MAYDAY)
-#define _TIP_NOTIFY	(1<<TIP_NOTIFY)
-#define _TIP_HEAD	(1<<TIP_HEAD)
+#define TLF_DOVETAIL		0	/* notify head domain about kernel events */
+#define TLF_HEAD		1	/* runs in head domain */
+
+#define _TLF_DOVETAIL		(1 << TLF_DOVETAIL)
+#define _TLF_HEAD		(1 << TLF_HEAD)
 
 #endif				/* __KERNEL__ */
 

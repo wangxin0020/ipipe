@@ -148,4 +148,14 @@
 
 #define irqs_disabled_flags(flags) raw_irqs_disabled_flags(flags)
 
+#ifdef CONFIG_IRQ_PIPELINE_DEBUG
+#define ipipe_check_irqoff()					\
+	do {							\
+		if (WARN_ON_ONCE(!hard_irqs_disabled()))	\
+			hard_local_irq_disable();		\
+	} while (0)
+#else
+static inline void ipipe_check_irqoff(void) { }
+#endif
+
 #endif

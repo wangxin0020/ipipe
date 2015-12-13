@@ -13,7 +13,6 @@
 #include <linux/irq.h>
 #include <linux/smp.h>
 #include <linux/interrupt.h>
-#include <linux/ipipe.h>
 
 #include <asm/io.h>
 #include <asm/irq.h>
@@ -40,14 +39,10 @@ static void fsl_mpic_mask_err(struct irq_data *d)
 	u32 eimr;
 	struct mpic *mpic = irq_data_get_irq_chip_data(d);
 	unsigned int src = virq_to_hw(d->irq) - mpic->err_int_vecs[0];
-	unsigned long flags;
 
-	flags = hard_cond_local_irq_save();
-	ipipe_lock_irq(d->irq);
 	eimr = mpic_fsl_err_read(mpic->err_regs, MPIC_ERR_INT_EIMR);
 	eimr |= (1 << (31 - src));
 	mpic_fsl_err_write(mpic->err_regs, eimr);
-	hard_cond_local_irq_restore(flags);
 }
 
 static void fsl_mpic_unmask_err(struct irq_data *d)
@@ -55,20 +50,18 @@ static void fsl_mpic_unmask_err(struct irq_data *d)
 	u32 eimr;
 	struct mpic *mpic = irq_data_get_irq_chip_data(d);
 	unsigned int src = virq_to_hw(d->irq) - mpic->err_int_vecs[0];
-	unsigned long flags;
 
-	flags = hard_cond_local_irq_save();
 	eimr = mpic_fsl_err_read(mpic->err_regs, MPIC_ERR_INT_EIMR);
 	eimr &= ~(1 << (31 - src));
 	mpic_fsl_err_write(mpic->err_regs, eimr);
-	ipipe_unlock_irq(d->irq);
-	hard_cond_local_irq_restore(flags);
 }
 
 static struct irq_chip fsl_mpic_err_chip = {
 	.irq_disable	= fsl_mpic_mask_err,
 	.irq_mask	= fsl_mpic_mask_err,
 	.irq_unmask	= fsl_mpic_unmask_err,
+	.irq_hold	= fsl_mpic_mask_err,
+	.flags		= IRQCHIP_PIPELINE_SAFE,
 };
 
 int mpic_setup_error_int(struct mpic *mpic, int intvec)
@@ -109,11 +102,19 @@ int mpic_map_error_int(struct mpic *mpic, unsigned int virq, irq_hw_number_t  hw
 
 static irqreturn_t fsl_error_int_handler(int irq, void *data)
 {
+	struct irq_desc *desc = irq_to_desc(irq);
 	struct mpic *mpic = (struct mpic *) data;
 	u32 eisr, eimr;
 	int errint;
 	unsigned int cascade_irq;
+	unsigned long flags;
 
+	/*
+	 * In pipelined mode, we don't bother for potential deferral
+	 * of error interrupts, since only the host kernel may deal
+	 * with them. They are held pending until this handler can
+	 * run.
+	 */
 	eisr = mpic_fsl_err_read(mpic->err_regs, MPIC_ERR_INT_EISR);
 	eimr = mpic_fsl_err_read(mpic->err_regs, MPIC_ERR_INT_EIMR);
 
@@ -126,22 +127,24 @@ static irqreturn_t fsl_error_int_handler(int irq, void *data)
 				 mpic->err_int_vecs[errint]);
 		WARN_ON(cascade_irq == NO_IRQ);
 		if (cascade_irq != NO_IRQ) {
-			ipipe_handle_demuxed_irq(cascade_irq);
+			generic_handle_irq(cascade_irq);
 		} else {
+			/*
+			 * We could race with irq_hold/release when
+			 * pipelining, re-read and update the EIMR
+			 * under lock.
+			 */
+			irq_chip_state_lock_irqsave(desc, flags);
+			if (irqs_pipelined())
+				eimr = mpic_fsl_err_read(mpic->err_regs, MPIC_ERR_INT_EIMR);
 			eimr |=  1 << (31 - errint);
 			mpic_fsl_err_write(mpic->err_regs, eimr);
+			irq_chip_state_unlock_irqrestore(desc, flags);
 		}
 		eisr &= ~(1 << (31 - errint));
 	}
 
 	return IRQ_HANDLED;
-}
-
-static void __ipipe_error_cascade(unsigned int irq, struct irq_desc *desc)
-{
-#ifdef CONFIG_IPIPE
-	fsl_error_int_handler(irq, irq_get_handler_data(irq));
-#endif
 }
 
 void mpic_err_int_init(struct mpic *mpic, irq_hw_number_t irqnum)
@@ -158,13 +161,8 @@ void mpic_err_int_init(struct mpic *mpic, irq_hw_number_t irqnum)
 	/* Mask all error interrupts */
 	mpic_fsl_err_write(mpic->err_regs, ~0);
 
-	if (IS_ENABLED(CONFIG_IPIPE)) {
-		irq_set_chained_handler(virq, __ipipe_error_cascade);
-		irq_set_handler_data(virq, mpic);
-	} else {
-		ret = request_irq(virq, fsl_error_int_handler, IRQF_NO_THREAD,
-				  "mpic-error-int", mpic);
-		if (ret)
-			pr_err("Failed to register error interrupt handler\n");
-	}
+	ret = request_irq(virq, fsl_error_int_handler, IRQF_NO_THREAD,
+		    "mpic-error-int", mpic);
+	if (ret)
+		pr_err("Failed to register error interrupt handler\n");
 }

@@ -1,5 +1,5 @@
 /* -*- linux-c -*-
- * linux/arch/blackfin/kernel/ipipe.c
+ * arch/blackfin/kernel/irq_pipeline.c
  *
  * Copyright (C) 2005-2007 Philippe Gerum.
  *
@@ -39,79 +39,25 @@
 
 asmlinkage void asm_do_IRQ(unsigned int irq, struct pt_regs *regs);
 
-static void __ipipe_do_IRQ(unsigned int irq, void *cookie);
-
 static void __ipipe_no_irqtail(void);
-
-static atomic_t __ipipe_irq_lvdepth[IVG15 + 1];
-
-static unsigned long __ipipe_irq_lvmask = bfin_no_irqs;
 
 unsigned long __ipipe_irq_tail_hook = (unsigned long)__ipipe_no_irqtail;
 EXPORT_SYMBOL_GPL(__ipipe_irq_tail_hook);
 
-unsigned long __ipipe_core_clock;
-EXPORT_SYMBOL_GPL(__ipipe_core_clock);
-
 unsigned long __ipipe_freq_scale;
 EXPORT_SYMBOL_GPL(__ipipe_freq_scale);
 
-/*
- * __ipipe_enable_pipeline() -- We are running on the boot CPU, hw
- * interrupts are off, and secondary CPUs are still lost in space.
- */
-void __ipipe_enable_pipeline(void)
+DEFINE_PER_CPU(int, __ipipe_defer_root_sync);
+
+void __init arch_irq_pipeline_init(void)
 {
-	unsigned irq;
-
-	__ipipe_core_clock = get_cclk(); /* Fetch this once. */
-	__ipipe_freq_scale = 1000000000UL / __ipipe_core_clock;
-
-	for (irq = 0; irq < NR_IRQS; ++irq)
-		ipipe_request_irq(ipipe_root_domain, irq,
-				  __ipipe_do_IRQ, NULL,
-				  NULL);
+	__ipipe_hrclock_freq = get_cclk();
+	__ipipe_freq_scale = 1000000000UL / __ipipe_hrclock_freq;
 }
 
-void __ipipe_handle_irq(unsigned int irq, struct pt_regs *regs) /* hw IRQs off */
+static void do_IRQ_pipelined(unsigned int irq, void *cookie)
 {
-	struct ipipe_percpu_domain_data *p = ipipe_this_cpu_root_context();
-	int flags, s = -1;
-
-	if (test_bit(IPIPE_SYNCDEFER_FLAG, &p->status))
-		s = __test_and_set_bit(IPIPE_STALL_FLAG, &p->status);
-
-	flags = (regs && irq != IRQ_SYSTMR && irq != IRQ_CORETMR) ?
-		0 : IPIPE_IRQF_NOACK;
-	__ipipe_dispatch_irq(irq, flags);
-
-	if (s == 0)
-		__clear_bit(IPIPE_STALL_FLAG, &p->status);
-}
-
-void __ipipe_enable_irqdesc(struct ipipe_domain *ipd, unsigned int irq)
-{
-	struct irq_desc *desc = irq_to_desc(irq);
-	int prio = __ipipe_get_irq_priority(irq);
-
-	desc->depth = 0;
-	if (ipd != ipipe_root_domain &&
-	    atomic_inc_return(&__ipipe_irq_lvdepth[prio]) == 1)
-		__set_bit(prio, &__ipipe_irq_lvmask);
-}
-
-void __ipipe_disable_irqdesc(struct ipipe_domain *ipd, unsigned int irq)
-{
-	int prio = __ipipe_get_irq_priority(irq);
-
-	if (ipd != ipipe_root_domain &&
-	    atomic_dec_and_test(&__ipipe_irq_lvdepth[prio]))
-		__clear_bit(prio, &__ipipe_irq_lvmask);
-}
-
-static void __ipipe_do_IRQ(unsigned int irq, void *cookie)
-{
-	struct pt_regs *regs = raw_cpu_ptr(&ipipe_percpu.tick_regs);
+	struct pt_regs *regs = raw_cpu_ptr(&irq_pipeline.tick_regs);
 	asm_do_IRQ(irq, regs);
 }
 
@@ -119,28 +65,23 @@ static void __ipipe_no_irqtail(void)
 {
 }
 
-int __ipipe_do_sync_check(void)
+void irq_stage_sync_current(void)
 {
-	return !(ipipe_root_p &&
-		 test_bit(IPIPE_SYNCDEFER_FLAG, &__ipipe_root_status));
+	if (!__on_root_stage() || raw_cpu_read(__ipipe_defer_root_sync) == 0)
+		__irq_stage_sync_current();
 }
 
-int ipipe_get_sysinfo(struct ipipe_sysinfo *info)
+void arch_irq_push_stage(struct irq_stage *stage,
+			 struct irq_pipeline_clocking *clocking)
 {
-	info->sys_nr_cpus = num_online_cpus();
-	info->sys_cpu_freq = ipipe_cpu_freq();
-	info->sys_hrtimer_irq = per_cpu(ipipe_percpu.hrtimer_irq, 0);
-	info->sys_hrtimer_freq = __ipipe_hrtimer_freq;
-	info->sys_hrclock_freq = __ipipe_core_clock;
-
-	return 0;
+	clocking->sys_hrclock_freq = __ipipe_hrclock_freq;
+	clocking->hrclock_name = "cyclectr";
 }
-EXPORT_SYMBOL_GPL(ipipe_get_sysinfo);
 
 void __ipipe_sync_root(void)
 {
 	void (*irq_tail_hook)(void) = (void (*)(void))__ipipe_irq_tail_hook;
-	struct ipipe_percpu_domain_data *p;
+	struct irq_stage_data *p;
 	unsigned long flags;
 
 	BUG_ON(irqs_disabled());
@@ -152,102 +93,29 @@ void __ipipe_sync_root(void)
 
 	clear_thread_flag(TIF_IRQ_SYNC);
 
-	p = ipipe_this_cpu_root_context();
-	if (__ipipe_ipending_p(p))
-		__ipipe_sync_stage();
+	p = irq_root_this_context();
+	if (irq_staged_waiting(p))
+		irq_stage_sync_current();
 
 	hard_local_irq_restore(flags);
 }
 
-unsigned long __ipipe_hard_save_root_irqs(void)
-{
-	/*
-	 * This code is called by the ins{bwl} routines (see
-	 * arch/blackfin/lib/ins.S), which are heavily used by the
-	 * network stack. It masks all interrupts but those handled by
-	 * non-root domains, so that we keep decent network transfer
-	 * rates for Linux without inducing pathological jitter for
-	 * the real-time domain.
-	 */
-	bfin_sti(__ipipe_irq_lvmask);
-	return __test_and_set_bit(IPIPE_STALL_FLAG, &__ipipe_root_status) ?
-		bfin_no_irqs : bfin_irq_flags;
-}
-
-void __ipipe_hard_restore_root_irqs(unsigned long flags)
-{
-	if (flags != bfin_no_irqs)
-		__clear_bit(IPIPE_STALL_FLAG, &__ipipe_root_status);
-
-	bfin_sti(bfin_irq_flags);
-}
-
-/*
- * We could use standard atomic bitops in the following root status
- * manipulation routines, but let's prepare for SMP support in the
- * same move, preventing CPU migration as required.
- */
-void ipipe_stall_root(void)
-{
-	unsigned long *p, flags;
-
-	ipipe_root_only();
-	flags = hard_smp_local_irq_save();
-	p = &__ipipe_root_status;
-	__set_bit(IPIPE_STALL_FLAG, p);
-	hard_smp_local_irq_restore(flags);
-}
-EXPORT_SYMBOL_GPL(ipipe_stall_root);
-
-unsigned long ipipe_test_and_stall_root(void)
-{
-	unsigned long *p, flags;
-	int x;
-
-	ipipe_root_only();
-	flags = hard_smp_local_irq_save();
-	p = &__ipipe_root_status;
-	x = __test_and_set_bit(IPIPE_STALL_FLAG, p);
-	hard_smp_local_irq_restore(flags);
-
-	return x;
-}
-EXPORT_SYMBOL_GPL(ipipe_test_and_stall_root);
-
-unsigned long ipipe_test_root(void)
-{
-	const unsigned long *p;
-	unsigned long flags;
-	int x;
-
-	ipipe_root_only();
-	flags = hard_smp_local_irq_save();
-	p = &__ipipe_root_status;
-	x = test_bit(IPIPE_STALL_FLAG, p);
-	hard_smp_local_irq_restore(flags);
-
-	return x;
-}
-EXPORT_SYMBOL_GPL(ipipe_test_root);
-
 void __ipipe_lock_root(void)
 {
-	unsigned long *p, flags;
+	unsigned long flags;
 
 	flags = hard_smp_local_irq_save();
-	p = &__ipipe_root_status;
-	__set_bit(IPIPE_SYNCDEFER_FLAG, p);
+	raw_cpu_write(__ipipe_defer_root_sync, 1);
 	hard_smp_local_irq_restore(flags);
 }
 EXPORT_SYMBOL_GPL(__ipipe_lock_root);
 
 void __ipipe_unlock_root(void)
 {
-	unsigned long *p, flags;
+	unsigned long flags;
 
 	flags = hard_smp_local_irq_save();
-	p = &__ipipe_root_status;
-	__clear_bit(IPIPE_SYNCDEFER_FLAG, p);
+	raw_cpu_write(__ipipe_defer_root_sync, 0);
 	hard_smp_local_irq_restore(flags);
 }
 EXPORT_SYMBOL_GPL(__ipipe_unlock_root);

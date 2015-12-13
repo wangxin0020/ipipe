@@ -113,7 +113,9 @@ static struct irq_chip msi_chip = {
 #if defined(CONFIG_IPIPE) && defined(CONFIG_SMP)
 	.irq_move		= move_xxapic_irq,
 #endif
-	.flags			= IRQCHIP_SKIP_SET_WAKE,
+	.irq_hold		= pci_msi_mask_irq,
+	.flags			= IRQCHIP_SKIP_SET_WAKE | \
+		IRQCHIP_PIPELINE_SAFE | IRQCHIP_PIPELINE_UNLOCKED,
 };
 
 int setup_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc,
@@ -215,7 +217,9 @@ static struct irq_chip dmar_msi_type = {
 #if defined(CONFIG_IPIPE) && defined(CONFIG_SMP)
 	.irq_move		= move_xxapic_irq,
 #endif
-	.flags			= IRQCHIP_SKIP_SET_WAKE,
+	.irq_hold		= dmar_msi_mask,
+	.flags			= IRQCHIP_SKIP_SET_WAKE | \
+		IRQCHIP_PIPELINE_SAFE | IRQCHIP_PIPELINE_UNLOCKED,
 };
 
 int arch_setup_dmar_msi(unsigned int irq)

@@ -35,30 +35,6 @@ extern void switch_cop(struct mm_struct *next);
 extern int use_cop(unsigned long acop, struct mm_struct *mm);
 extern void drop_cop(unsigned long acop, struct mm_struct *mm);
 
-#if !defined(CONFIG_IPIPE) || defined(CONFIG_IPIPE_WANT_PREEMPTIBLE_SWITCH)
-
-#define ipipe_mm_switch_protect(flags)		\
-  do { (void)(flags); } while (0)
-
-#define ipipe_mm_switch_unprotect(flags)	\
-  do { (void)(flags); } while (0)
-
-#else /* CONFIG_IPIPE && !CONFIG_IPIPE_WANT_PREEMPTIBLE_SWITCH */
-
-#define ipipe_mm_switch_protect(flags)		\
-  do {						\
-    	(flags) = hard_cond_local_irq_save();	\
-	barrier();				\
-  } while (0)					\
-
-#define ipipe_mm_switch_unprotect(flags)	\
-  do {						\
-	barrier();				\
-    	hard_cond_local_irq_restore(flags);	\
-  } while (0)					\
-
-#endif /* CONFIG_IPIPE && !CONFIG_IPIPE_WANT_PREEMPTIBLE_SWITCH */
-
 /*
  * switch_mm is the entry point called from the architecture independent
  * code in kernel/sched/core.c
@@ -67,7 +43,7 @@ static inline void __do_switch_mm(struct mm_struct *prev, struct mm_struct *next
 				  struct task_struct *tsk, bool irq_sync_p)
 {
 	/* Mark this context has been used on the new CPU */
-	cpumask_set_cpu(ipipe_processor_id(), mm_cpumask(next));
+	cpumask_set_cpu(raw_smp_processor_id(), mm_cpumask(next));
 
 	/* 32-bit keeps track of the current PGDIR in the thread struct */
 #ifdef CONFIG_PPC32
@@ -120,7 +96,7 @@ static inline void __switch_mm(struct mm_struct *prev, struct mm_struct *next,
  /*
   * mmu_context_nohash in SMP mode is tracking an activity counter
   * into the mm struct. Therefore, we make sure the kernel always sees
-  * the ipipe_percpu.active_mm update and the actual switch as a
+  * the irq_pipeline.active_mm update and the actual switch as a
   * single atomic operation. Since the related code already requires
   * to hard disable irqs all through the switch, there is no
   * additional penalty anyway.
@@ -129,20 +105,20 @@ static inline void __switch_mm(struct mm_struct *prev, struct mm_struct *next,
 #else
 #define mmswitch_irq_sync true
 #endif
-	IPIPE_WARN_ONCE(hard_irqs_disabled());
+	WARN_ON_ONCE(dovetail_debug() && hard_irqs_disabled());
 	for (;;) {
 		hard_local_irq_disable();
-		__this_cpu_write(ipipe_percpu.active_mm, NULL);
+		__this_cpu_write(irq_pipeline.active_mm, NULL);
 		barrier();
 		__do_switch_mm(prev, next, tsk, mmswitch_irq_sync);
 		if (!test_and_clear_thread_flag(TIF_MMSWITCH_INT)) {
-			__this_cpu_write(ipipe_percpu.active_mm, next);
+			__this_cpu_write(irq_pipeline.active_mm, next);
 			hard_local_irq_enable();
 			return;
 		}
 	}
 #else /* !CONFIG_IPIPE_WANT_PREEMPTIBLE_SWITCH */
-	IPIPE_WARN_ONCE(!hard_irqs_disabled());
+	WARN_ON_ONCE(dovetail_debug() && !hard_irqs_disabled());
 	__do_switch_mm(prev, next, tsk, false);
 #endif /* !CONFIG_IPIPE_WANT_PREEMPTIBLE_SWITCH */
 }
@@ -170,9 +146,9 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 {
 	unsigned long flags;
 
-	ipipe_mm_switch_protect(flags);
+	dovetail_switch_mm_enter(flags);
 	__switch_mm(prev, next, tsk);
-	ipipe_mm_switch_unprotect(flags);
+	dovetail_switch_mm_exit(flags);
 }
 
 #define deactivate_mm(tsk,mm)	do { } while (0)

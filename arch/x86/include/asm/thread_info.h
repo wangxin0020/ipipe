@@ -48,28 +48,26 @@
 struct task_struct;
 #include <asm/processor.h>
 #include <linux/atomic.h>
-#include <ipipe/thread_info.h>
+#include <dovetail/thread_info.h>
 
 struct thread_info {
 	struct task_struct	*task;		/* main task structure */
 	__u32			flags;		/* low level flags */
-	__u32			status;		/* thread synchronous flags */
+	__u32			local_flags;	/* thread local (synchronous) flags */
 	__u32			cpu;		/* current CPU */
 	int			saved_preempt_count;
 	mm_segment_t		addr_limit;
-#ifdef CONFIG_IPIPE
-	unsigned long		ipipe_flags;
-#endif
-	struct ipipe_threadinfo ipipe_data;
 	void __user		*sysenter_return;
 	unsigned int		sig_on_uaccess_error:1;
 	unsigned int		uaccess_err:1;	/* uaccess failed */
+	struct dovetail_thread_state dovetail_state;
 };
 
 #define INIT_THREAD_INFO(tsk)			\
 {						\
 	.task		= &tsk,			\
 	.flags		= 0,			\
+	.local_flags	= 0,			\
 	.cpu		= 0,			\
 	.saved_preempt_count = INIT_PREEMPT_COUNT,	\
 	.addr_limit	= KERNEL_DS,		\
@@ -102,6 +100,7 @@ struct thread_info {
 #define TIF_SECCOMP		8	/* secure computing */
 #define TIF_USER_RETURN_NOTIFY	11	/* notify kernel of userspace return */
 #define TIF_UPROBE		12	/* breakpointed or singlestepping */
+#define TIF_MAYDAY		13	/* emergency trap pending */
 #define TIF_NOTSC		16	/* TSC is not accessible in userland */
 #define TIF_IA32		17	/* IA32 compatibility process */
 #define TIF_FORK		18	/* ret_from_fork */
@@ -126,6 +125,7 @@ struct thread_info {
 #define _TIF_SECCOMP		(1 << TIF_SECCOMP)
 #define _TIF_USER_RETURN_NOTIFY	(1 << TIF_USER_RETURN_NOTIFY)
 #define _TIF_UPROBE		(1 << TIF_UPROBE)
+#define _TIF_MAYDAY		(1 << TIF_MAYDAY)
 #define _TIF_NOTSC		(1 << TIF_NOTSC)
 #define _TIF_IA32		(1 << TIF_IA32)
 #define _TIF_FORK		(1 << TIF_FORK)
@@ -172,15 +172,6 @@ struct thread_info {
 
 #define _TIF_WORK_CTXSW_PREV (_TIF_WORK_CTXSW|_TIF_USER_RETURN_NOTIFY)
 #define _TIF_WORK_CTXSW_NEXT (_TIF_WORK_CTXSW)
-
-/* ti->ipipe_flags */
-#define TIP_MAYDAY	0	/* MAYDAY call is pending */
-#define TIP_NOTIFY	1	/* Notify head domain about kernel events */
-#define TIP_HEAD	2	/* Runs in head domain */
-
-#define _TIP_MAYDAY	(1 << TIP_MAYDAY)
-#define _TIP_NOTIFY	(1 << TIP_NOTIFY)
-#define _TIP_HEAD	(1 << TIP_HEAD)
 
 #define STACK_WARN		(THREAD_SIZE/8)
 
@@ -254,29 +245,34 @@ static inline unsigned long current_stack_pointer(void)
  */
 #define TS_COMPAT		0x0002	/* 32bit syscall active (64BIT)*/
 #define TS_RESTORE_SIGMASK	0x0008	/* restore signal mask in do_signal() */
+#define TS_DOVETAIL		0x0400	/* Notify head domain about kernel events */
+#define TS_HEAD			0x0800	/* Runs in head domain */
+
+#define _TLF_DOVETAIL		TS_DOVETAIL
+#define _TLF_HEAD		TS_HEAD
 
 #ifndef __ASSEMBLY__
 #define HAVE_SET_RESTORE_SIGMASK	1
 static inline void set_restore_sigmask(void)
 {
 	struct thread_info *ti = current_thread_info();
-	ti->status |= TS_RESTORE_SIGMASK;
+	ti->local_flags |= TS_RESTORE_SIGMASK;
 	WARN_ON(!test_bit(TIF_SIGPENDING, (unsigned long *)&ti->flags));
 }
 static inline void clear_restore_sigmask(void)
 {
-	current_thread_info()->status &= ~TS_RESTORE_SIGMASK;
+	current_thread_info()->local_flags &= ~TS_RESTORE_SIGMASK;
 }
 static inline bool test_restore_sigmask(void)
 {
-	return current_thread_info()->status & TS_RESTORE_SIGMASK;
+	return current_thread_info()->local_flags & TS_RESTORE_SIGMASK;
 }
 static inline bool test_and_clear_restore_sigmask(void)
 {
 	struct thread_info *ti = current_thread_info();
-	if (!(ti->status & TS_RESTORE_SIGMASK))
+	if (!(ti->local_flags & TS_RESTORE_SIGMASK))
 		return false;
-	ti->status &= ~TS_RESTORE_SIGMASK;
+	ti->local_flags &= ~TS_RESTORE_SIGMASK;
 	return true;
 }
 
@@ -286,7 +282,7 @@ static inline bool is_ia32_task(void)
 	return true;
 #endif
 #ifdef CONFIG_IA32_EMULATION
-	if (current_thread_info()->status & TS_COMPAT)
+	if (current_thread_info()->local_flags & TS_COMPAT)
 		return true;
 #endif
 	return false;

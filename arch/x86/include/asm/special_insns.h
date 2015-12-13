@@ -7,8 +7,6 @@
 #include <asm/nops.h>
 #include <asm/percpu.h>
 
-DECLARE_PER_CPU(unsigned long, __ipipe_cr2);
-
 static inline void native_clts(void)
 {
 	asm volatile("clts");
@@ -122,18 +120,16 @@ static inline void write_cr0(unsigned long x)
 	native_write_cr0(x);
 }
 
-#ifdef CONFIG_IPIPE
+#ifdef CONFIG_DOVETAIL
+DECLARE_PER_CPU(unsigned long, __ipipe_cr2);
 #define read_cr2()     __this_cpu_read(__ipipe_cr2)
+#define write_cr2(x)   __this_cpu_write(__ipipe_cr2, x)
 #else
 static inline unsigned long read_cr2(void)
 {
 	return native_read_cr2();
 }
-#endif
 
-#ifdef CONFIG_IPIPE
-#define write_cr2(x)   __this_cpu_write(__ipipe_cr2, x)
-#else
 static inline void write_cr2(unsigned long x)
 {
 	native_write_cr2(x);

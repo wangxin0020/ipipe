@@ -54,9 +54,6 @@ enum {
 	IRQS_WAITING		= 0x00000080,
 	IRQS_PENDING		= 0x00000200,
 	IRQS_SUSPENDED		= 0x00000800,
-#ifdef CONFIG_IPIPE
-	IPIPE_IRQS_NEEDS_STARTUP= 0x80000000,
-#endif
 };
 
 #include "debug.h"
@@ -75,6 +72,7 @@ extern void irq_enable(struct irq_desc *desc);
 extern void irq_disable(struct irq_desc *desc);
 extern void irq_percpu_enable(struct irq_desc *desc, unsigned int cpu);
 extern void irq_percpu_disable(struct irq_desc *desc, unsigned int cpu);
+extern void irq_release(struct irq_desc *desc);
 extern void mask_irq(struct irq_desc *desc);
 extern void unmask_irq(struct irq_desc *desc);
 extern void unmask_threaded_irq(struct irq_desc *desc);

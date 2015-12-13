@@ -444,7 +444,7 @@ void tsi108_irq_cascade(unsigned int irq, struct irq_desc *desc)
 	unsigned int cascade_irq = get_pci_source();
 
 	if (cascade_irq != NO_IRQ)
-		ipipe_handle_demuxed_irq(cascade_irq);
+		generic_handle_irq(cascade_irq);
 
 	chip->irq_eoi(&desc->irq_data);
 }

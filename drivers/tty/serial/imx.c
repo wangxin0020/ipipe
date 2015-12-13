@@ -1613,34 +1613,75 @@ static void imx_console_putchar(struct uart_port *port, int ch)
 	writel(ch, sport->port.membase + URTX0);
 }
 
-/*
- * Interrupts are disabled on entering
- */
-static void
-imx_console_write(struct console *co, const char *s, unsigned int count)
+static inline int console_clk_enable(struct imx_port *sport)
+{
+	int ret;
+	
+	ret = clk_enable(sport->clk_per);
+	if (ret)
+		return ret;
+
+	ret = clk_enable(sport->clk_ipg);
+	if (ret) {
+		clk_disable(sport->clk_per);
+		return ret;
+	}
+
+	return 0;
+}
+
+static inline void console_clk_disable(struct imx_port *sport)
+{
+	clk_disable(sport->clk_ipg);
+	clk_disable(sport->clk_per);
+}
+
+#ifdef CONFIG_RAW_PRINTK
+
+static inline int imx_console_clk_setup(struct imx_port *sport)
+{
+	return console_clk_enable(sport);
+}
+
+static inline void imx_console_clk_cleanup(struct imx_port *sport)
+{
+	console_clk_disable(sport);
+}
+
+static inline int imx_console_clk_enable(struct imx_port *sport)
+{
+	return 0;
+}
+
+static inline void imx_console_clk_disable(struct imx_port *sport) { }
+
+#else
+
+static inline int imx_console_clk_setup(struct imx_port *sport)
+{
+	return 0;
+}
+
+static inline void imx_console_clk_cleanup(struct imx_port *sport) { }
+
+static inline int imx_console_clk_enable(struct imx_port *sport)
+{
+	return console_clk_enable(sport);
+}
+
+static inline void imx_console_clk_disable(struct imx_port *sport)
+{
+	console_clk_disable(sport);
+}
+
+#endif
+
+static void imx_console_write_raw(struct console *co, const char *s,
+				  unsigned int count)
 {
 	struct imx_port *sport = imx_ports[co->index];
 	struct imx_port_ucrs old_ucr;
 	unsigned int ucr1;
-	unsigned long flags = 0;
-	int locked = 1;
-	int retval;
-
-	retval = clk_enable(sport->clk_per);
-	if (retval)
-		return;
-	retval = clk_enable(sport->clk_ipg);
-	if (retval) {
-		clk_disable(sport->clk_per);
-		return;
-	}
-
-	if (sport->port.sysrq)
-		locked = 0;
-	else if (oops_in_progress)
-		locked = spin_trylock_irqsave(&sport->port.lock, flags);
-	else
-		spin_lock_irqsave(&sport->port.lock, flags);
 
 	/*
 	 *	First, save UCR1/2/3 and then disable interrupts
@@ -1666,12 +1707,34 @@ imx_console_write(struct console *co, const char *s, unsigned int count)
 	while (!(readl(sport->port.membase + USR2) & USR2_TXDC));
 
 	imx_port_ucrs_restore(&sport->port, &old_ucr);
+}
+
+/*
+ * Interrupts are disabled on entering
+ */
+static void
+imx_console_write(struct console *co, const char *s, unsigned int count)
+{
+	struct imx_port *sport = imx_ports[co->index];
+	unsigned long flags = 0;
+	int locked = 1;
+
+	if (imx_console_clk_enable(sport))
+		return;
+
+	if (sport->port.sysrq)
+		locked = 0;
+	else if (oops_in_progress)
+		locked = spin_trylock_irqsave(&sport->port.lock, flags);
+	else
+		spin_lock_irqsave(&sport->port.lock, flags);
+
+	imx_console_write_raw(co, s, count);
 
 	if (locked)
 		spin_unlock_irqrestore(&sport->port.lock, flags);
 
-	clk_disable(sport->clk_ipg);
-	clk_disable(sport->clk_per);
+	imx_console_clk_disable(sport);
 }
 
 /*
@@ -1779,8 +1842,16 @@ imx_console_setup(struct console *co, char *options)
 	}
 
 	retval = clk_prepare(sport->clk_per);
-	if (retval)
+	if (retval) {
 		clk_disable_unprepare(sport->clk_ipg);
+		goto error_console;
+	}
+
+	retval = imx_console_clk_setup(sport);
+	if (retval) {
+		clk_disable_unprepare(sport->clk_per);
+		clk_disable_unprepare(sport->clk_ipg);
+	}
 
 error_console:
 	return retval;
@@ -1792,7 +1863,12 @@ static struct console imx_console = {
 	.write		= imx_console_write,
 	.device		= uart_console_device,
 	.setup		= imx_console_setup,
+#ifdef CONFIG_RAW_PRINTK
+	.write_raw	= imx_console_write_raw,
+	.flags		= CON_PRINTBUFFER | CON_RAW,
+#else
 	.flags		= CON_PRINTBUFFER,
+#endif
 	.index		= -1,
 	.data		= &imx_reg,
 };
@@ -1989,6 +2065,8 @@ static int serial_imx_probe(struct platform_device *pdev)
 static int serial_imx_remove(struct platform_device *pdev)
 {
 	struct imx_port *sport = platform_get_drvdata(pdev);
+
+	imx_console_clk_cleanup(sport);
 
 	return uart_remove_one_port(&imx_reg, &sport->port);
 }

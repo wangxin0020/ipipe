@@ -128,52 +128,53 @@ END_FW_FTR_SECTION_IFSET(FW_FEATURE_SPLPAR)
 	EMIT_BUG_ENTRY 1b,__FILE__,__LINE__,BUGFLAG_WARNING
 #endif
 
-#ifdef CONFIG_IPIPE
+#ifdef CONFIG_DOVETAIL
 	COPY_SOFTISTATE(r11)
 	HARD_ENABLE_INTS
 	CURRENT_THREAD_INFO(r10, r1)
 	cmpldi	cr0,r0,NR_syscalls
 	blt	slow_path
-	ld	r11,TI_IPIPE(r10)
-	andi.	r12,r11,_TIP_HEAD /* implies that TIP_NOTIFY if set */
+	ld	r11,TI_LOCAL_FLAGS(r10)
+	andi.	r12,r11,_TLF_HEAD /* implies _TLF_DOVETAIL if set */
 	beq	slow_path_check
 	addi	r3,r1,GPR0
-	bl	ipipe_fastcall_hook /* __IPIPE_SYSCALL_E is assumed */
+	bl	dovetail_fastcall_hook /* _DOVETAIL_SYSCALL_E is assumed */
 	cmpwi	r3,0
 	blt	no_fastcall
 	CURRENT_THREAD_INFO(r10, r1)
-	ld	r11,TI_IPIPE(r10)
-	andi.	r12,r11,_TIP_HEAD
+	ld	r11,TI_LOCAL_FLAGS(r10)
+	andi.	r12,r11,_TLF_HEAD
 	bne+	fastcall_exit_check
-	bl	__ipipe_root_sync
+	bl	dovetail_root_sync
 	ld	r3,GPR3(r1)
 	b	.Lsyscall_exit
 no_fastcall:
 	/* fastcall handler not implemented */
 	ld	r0,GPR0(r1)
 slow_path:
-	ld	r11,TI_IPIPE(r10)
+	ld	r11,TI_LOCAL_FLAGS(r10)
 slow_path_check:
-	andi.	r12,r11,_TIP_NOTIFY
+	andi.	r12,r11,_TLF_DOVETAIL
 	bne	pipeline_syscall
 	cmpldi	cr0,r0,NR_syscalls
 	blt	root_syscall
 pipeline_syscall:
 	addi	r3,r1,GPR0
-	bl	__ipipe_notify_syscall
+	bl	dovetail_handle_syscall_slow
 	cmpwi	cr1,r3,0
 	CURRENT_THREAD_INFO(r10, r1)
-	ld	r11,TI_IPIPE(r10)
-	andi.	r12,r11,_TIP_HEAD
+	ld	r11,TI_LOCAL_FLAGS(r10)
+	andi.	r12,r11,_TLF_HEAD
 	bne	fastcall_exit
 	beq	cr1,root_syscall
 	ld	r3,GPR3(r1)	/* syscall return value */
 	b	.Lsyscall_exit
 fastcall_exit_check:
-	andi.	r12,r11,_TIP_MAYDAY
+	ld	r11,TI_FLAGS(r10)
+	andi.	r12,r11,_TIF_MAYDAY
 	beq+	fastcall_exit
 	addi	r3,r1,GPR0
-	bl	__ipipe_call_mayday
+	bl	dovetail_call_mayday
 fastcall_exit:
 	HARD_DISABLE_INTS_RI
 	ld	r3,GPR3(r1)	/* syscall return value */
@@ -195,7 +196,7 @@ root_syscall:
 	 */
 	li	r10,1
 	std	r10,SOFTE(r1)
-#endif /* !CONFIG_IPIPE */
+#endif /* !CONFIG_DOVETAIL */
 	addi	r9,r1,STACK_FRAME_OVERHEAD
 	
 	CURRENT_THREAD_INFO(r11, r1)
@@ -648,11 +649,11 @@ _GLOBAL(ret_from_except_lite)
 	 */
 	HARD_DISABLE_INTS
 	CURRENT_THREAD_INFO(r9, r1)
-#ifdef CONFIG_IPIPE
-	ld	r3,TI_IPIPE(r9)
-	andi.	r3,r3,_TIP_HEAD
+#ifdef CONFIG_DOVETAIL
+	ld	r3,TI_LOCAL_FLAGS(r9)
+	andi.	r3,r3,_TLF_HEAD
 	bne-	restore
-#endif /* CONFIG_IPIPE */
+#endif /* CONFIG_DOVETAIL */
 
 	ld	r3,_MSR(r1)
 #ifdef CONFIG_PPC_BOOK3E
@@ -762,11 +763,7 @@ resume_kernel:
 	 * sure we are soft-disabled first and reconcile irq state.
 	 */
 	RECONCILE_IRQ_STATE(r3,r4)
-#ifdef CONFIG_IPIPE
-1:	bl	__ipipe_preempt_schedule_irq
-#else
 1:	bl	preempt_schedule_irq
-#endif
 	/* Re-test flags and eventually loop */
 	CURRENT_THREAD_INFO(r9, r1)
 	ld	r4,TI_FLAGS(r9)

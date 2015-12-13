@@ -34,7 +34,6 @@
 #include <linux/of.h>
 #include <linux/irqdomain.h>
 #include <linux/i2c/twl.h>
-#include <linux/ipipe.h>
 
 #include "twl-core.h"
 

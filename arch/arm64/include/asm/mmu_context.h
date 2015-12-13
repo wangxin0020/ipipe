@@ -150,14 +150,14 @@ check_and_switch_context(struct mm_struct *mm,
 	return 0;
 }
 
-#ifdef CONFIG_IPIPE
+#ifdef CONFIG_DOVETAIL
 extern void deferred_switch_mm(struct mm_struct *mm);
-#else /* !I-pipe */
+#else
 static inline void deferred_switch_mm(struct mm_struct *next)
 {
 	cpu_switch_mm(next->pgd, next);
 }
-#endif /* !I-pipe */
+#endif
 
 #define init_new_context(tsk,mm)	(__init_new_context(tsk,mm),0)
 #define destroy_context(mm)		do { } while(0)
@@ -173,9 +173,9 @@ static inline void finish_arch_post_lock_switch(void)
 
 		__new_context(mm);
 
-		ipipe_mm_switch_protect(flags);
+		dovetail_switch_mm_enter(flags);
 		deferred_switch_mm(mm);
-		ipipe_mm_switch_unprotect(flags);
+		dovetail_switch_mm_exit(flags);
 	}
 	preempt_enable();
 }
@@ -204,7 +204,7 @@ static inline int
 __do_switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	       struct task_struct *tsk, bool may_defer)
 {
-	const unsigned int cpu = ipipe_processor_id();
+	const unsigned int cpu = raw_smp_processor_id();
 	int ret = 0;
 
 	/*
@@ -218,20 +218,20 @@ __do_switch_mm(struct mm_struct *prev, struct mm_struct *next,
 
 	if (!cpumask_test_and_set_cpu(cpu, mm_cpumask(next)) || prev != next) {
 		ret = check_and_switch_context(next, tsk, may_defer);
-#ifdef CONFIG_IPIPE
+#ifdef CONFIG_DOVETAIL
 		if (ret < 0)
 			cpumask_clear_cpu(cpu, mm_cpumask(next));
-#endif /* CONFIG_IPIPE */
+#endif
 	}
 	return ret;
 }
 
-#if defined(CONFIG_IPIPE) && defined(CONFIG_MMU)
+#ifdef CONFIG_DOVETAIL
 extern void __switch_mm_inner(struct mm_struct *prev, struct mm_struct *next,
 			      struct task_struct *tsk);
-#else /* !I-pipe || !MMU */
+#else
 #define __switch_mm_inner(prev, next, tsk) __do_switch_mm(prev, next, tsk, true)
-#endif /* !I-pipe  || !MMU */
+#endif
 
 static inline void
 ipipe_switch_mm_head(struct mm_struct *prev, struct mm_struct *next,
@@ -252,9 +252,9 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	  struct task_struct *tsk)
 {
 	unsigned long flags;
-	ipipe_mm_switch_protect(flags);
+	dovetail_switch_mm_enter(flags);
 	__switch_mm(prev, next, tsk);
-	ipipe_mm_switch_unprotect(flags);
+	dovetail_switch_mm_exit(flags);
 }
 
 #define deactivate_mm(tsk,mm)	do { } while (0)

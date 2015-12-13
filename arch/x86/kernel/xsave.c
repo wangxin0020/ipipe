@@ -689,7 +689,7 @@ void xsave_init(void)
 void __init_refok eager_fpu_init(void)
 {
 	WARN_ON(used_math());
-	current_thread_info()->status = 0;
+	current_thread_info()->local_flags = 0;
 
 	if (eagerfpu == ENABLE)
 		setup_force_cpu_cap(X86_FEATURE_EAGER_FPU);

@@ -20,19 +20,14 @@
 #include <linux/clockchips.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
-#include <linux/ipipe.h>
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
-#include <linux/ipipe_tickdev.h>
-#include <linux/irqchip/arm-gic.h>
 
 #include <asm/smp_plat.h>
 #include <asm/smp_twd.h>
-#include <asm/cputype.h>
 
 /* set up by the platform code */
 static void __iomem *twd_base;
-static struct clk *twd_clk;
 
 static struct clk *twd_clk;
 static unsigned long twd_timer_rate;
@@ -40,38 +35,6 @@ static DEFINE_PER_CPU(bool, percpu_setup_called);
 
 static struct clock_event_device __percpu *twd_evt;
 static int twd_ppi;
-
-#if defined(CONFIG_IPIPE) && defined(CONFIG_SMP)
-static DEFINE_PER_CPU(struct ipipe_timer, twd_itimer);
-
-void __iomem *gt_base;
-
-static void twd_ack(void)
-{
-	writel_relaxed(1, twd_base + TWD_TIMER_INTSTAT);
-}
-
-static void twd_get_clock(struct device_node *np);
-static void __cpuinit twd_calibrate_rate(void);
-
-#ifdef CONFIG_IPIPE_DEBUG_INTERNAL
-
-static DEFINE_PER_CPU(int, irqs);
-
-void twd_hrtimer_debug(unsigned int irq) /* hw interrupt off */
-{
-	int cpu = ipipe_processor_id();
-
-	if ((++per_cpu(irqs, cpu) % HZ) == 0) {
-#if 0
-		raw_printk("%c", 'A' + cpu);
-#else
-		do { } while (0);
-#endif
-	}
-}
-#endif /* CONFIG_IPIPE_DEBUG_INTERNAL */
-#endif /* CONFIG_IPIPE && CONFIG_SMP */
 
 static void twd_set_mode(enum clock_event_mode mode,
 			struct clock_event_device *clk)
@@ -269,12 +232,8 @@ static irqreturn_t twd_handler(int irq, void *dev_id)
 {
 	struct clock_event_device *evt = dev_id;
 
-	if (clockevent_ipipe_stolen(evt))
-		goto handle;
-
 	if (twd_timer_ack()) {
-	  handle:
-		evt->event_handler(evt);
+		clockevents_handle_event(evt);
 		return IRQ_HANDLED;
 	}
 
@@ -335,22 +294,11 @@ static void twd_timer_setup(void)
 
 	clk->name = "local_timer";
 	clk->features = CLOCK_EVT_FEAT_PERIODIC | CLOCK_EVT_FEAT_ONESHOT |
-			CLOCK_EVT_FEAT_C3STOP;
+			CLOCK_EVT_FEAT_C3STOP | CLOCK_EVT_FEAT_PIPELINE;
 	clk->rating = 350;
 	clk->set_mode = twd_set_mode;
 	clk->set_next_event = twd_set_next_event;
 	clk->irq = twd_ppi;
-
-#if defined(CONFIG_IPIPE) && defined(CONFIG_SMP)
-	printk(KERN_INFO "I-pipe, %lu.%03lu MHz timer\n",
-	       twd_timer_rate / 1000000,
-	       (twd_timer_rate % 1000000) / 1000);
-	clk->ipipe_timer = raw_cpu_ptr(&twd_itimer);
-	clk->ipipe_timer->irq = clk->irq;
-	clk->ipipe_timer->ack = twd_ack;
-	clk->ipipe_timer->min_delay_ticks = 0xf;
-#endif
-
 	clk->cpumask = cpumask_of(cpu);
 
 	clockevents_config_and_register(clk, twd_timer_rate,
@@ -387,7 +335,8 @@ static int __init twd_local_timer_common_register(struct device_node *np)
 		goto out_free;
 	}
 
-	err = request_percpu_irq(twd_ppi, twd_handler, "twd", twd_evt);
+	err = __request_percpu_irq(twd_ppi, twd_handler,
+				   "twd", IRQF_TIMER, twd_evt);
 	if (err) {
 		pr_err("twd: can't register interrupt %d (%d)\n", twd_ppi, err);
 		goto out_free;
@@ -408,10 +357,6 @@ static int __init twd_local_timer_common_register(struct device_node *np)
 		twd_timer_setup();
 	else
 		late_time_init = twd_timer_setup;
-
-#ifdef CONFIG_IPIPE_DEBUG_INTERNAL
-	__ipipe_mach_hrtimer_debug = &twd_hrtimer_debug;
-#endif /* CONFIG_IPIPE_DEBUG_INTERNAL */
 
 	return 0;
 
@@ -436,7 +381,6 @@ int __init twd_local_timer_register(struct twd_local_timer *tlt)
 	if (!twd_base)
 		return -ENOMEM;
 
-
 	return twd_local_timer_common_register(NULL);
 }
 
@@ -459,7 +403,6 @@ static void __init twd_local_timer_of_register(struct device_node *np)
 		err = -ENOMEM;
 		goto out;
 	}
-
 
 	err = twd_local_timer_common_register(np);
 

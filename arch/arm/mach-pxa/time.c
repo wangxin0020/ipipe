@@ -18,7 +18,6 @@
 #include <linux/clockchips.h>
 #include <linux/sched_clock.h>
 #include <linux/ipipe_tickdev.h>
-#include <linux/ipipe.h>
 
 #include <asm/div64.h>
 #include <asm/mach/irq.h>

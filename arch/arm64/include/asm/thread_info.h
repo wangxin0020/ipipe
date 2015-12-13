@@ -35,7 +35,7 @@
 struct task_struct;
 
 #include <asm/types.h>
-#include <ipipe/thread_info.h>
+#include <dovetail/thread_info.h>
 
 typedef unsigned long mm_segment_t;
 
@@ -47,18 +47,17 @@ struct thread_info {
 	unsigned long		flags;		/* low level flags */
 	mm_segment_t		addr_limit;	/* address limit */
 	struct task_struct	*task;		/* main task structure */
+	__u32			local_flags;
 	int			preempt_count;	/* 0 => preemptable, <0 => bug */
 	int			cpu;		/* cpu */
-#ifdef CONFIG_IPIPE
-	unsigned long		ipipe_flags;
-#endif
-	struct ipipe_threadinfo ipipe_data;
+	struct dovetail_thread_state dovetail_state;
 };
 
 #define INIT_THREAD_INFO(tsk)						\
 {									\
 	.task		= &tsk,						\
 	.flags		= 0,						\
+	.local_flags	= 0,						\
 	.preempt_count	= INIT_PREEMPT_COUNT,				\
 	.addr_limit	= KERNEL_DS,					\
 }
@@ -117,9 +116,8 @@ static inline struct thread_info *current_thread_info(void)
 #define TIF_SINGLESTEP		21
 #define TIF_32BIT		22	/* 32bit process */
 #define TIF_SWITCH_MM		23	/* deferred switch_mm */
-#ifdef CONFIG_IPIPE
+#define TIF_MAYDAY		24	/* emergency trap pending */
 #define TIF_MMSWITCH_INT	25
-#endif /* CONFIG_IPIPE */
 
 #define _TIF_SIGPENDING		(1 << TIF_SIGPENDING)
 #define _TIF_NEED_RESCHED	(1 << TIF_NEED_RESCHED)
@@ -131,9 +129,8 @@ static inline struct thread_info *current_thread_info(void)
 #define _TIF_SYSCALL_TRACEPOINT	(1 << TIF_SYSCALL_TRACEPOINT)
 #define _TIF_SECCOMP		(1 << TIF_SECCOMP)
 #define _TIF_32BIT		(1 << TIF_32BIT)
-#ifdef CONFIG_IPIPE
+#define _TIF_MAYDAY		(1 << TIF_MAYDAY)
 #define _TIF_MMSWITCH_INT	(1 << TIF_MMSWITCH_INT)
-#endif /* CONFIG_IPIPE */
 
 #define _TIF_WORK_MASK		(_TIF_NEED_RESCHED | _TIF_SIGPENDING | \
 				 _TIF_NOTIFY_RESUME | _TIF_FOREIGN_FPSTATE)
@@ -142,14 +139,13 @@ static inline struct thread_info *current_thread_info(void)
 				 _TIF_SYSCALL_TRACEPOINT | _TIF_SECCOMP | \
 				 _TIF_NOHZ)
 
-/* ti->ipipe_flags */
-#define TIP_MAYDAY	0	/* MAYDAY call is pending */
-#define TIP_NOTIFY	1	/* Notify head domain about kernel events */
-#define TIP_HEAD	2	/* Runs in head domain */
+/* Local (synchronous) thread flags. */
 
-#define _TIP_MAYDAY	(1 << TIP_MAYDAY)
-#define _TIP_NOTIFY	(1 << TIP_NOTIFY)
-#define _TIP_HEAD	(1 << TIP_HEAD)
+#define TLF_DOVETAIL		0	/* notify head domain about kernel events */
+#define TLF_HEAD		1	/* runs in head domain */
+
+#define _TLF_DOVETAIL		(1 << TLF_DOVETAIL)
+#define _TLF_HEAD		(1 << TLF_HEAD)
 
 #endif /* __KERNEL__ */
 #endif /* __ASM_THREAD_INFO_H */

@@ -42,7 +42,7 @@ extern unsigned int debug_smp_processor_id(void); /* from linux/smp.h */
 #define get_slb_shadow()	(get_paca()->slb_shadow_ptr)
 
 struct task_struct;
-struct ipipe_percpu_domain_data;
+struct irq_stage_data;
 
 /*
  * Defines the layout of the paca.
@@ -179,7 +179,7 @@ struct paca_struct {
 #endif
 
 #ifdef CONFIG_IPIPE
-	struct ipipe_percpu_domain_data *root_context;	/* Address of root context data */
+	struct irq_stage_data *root_context;	/* Address of root context data */
 #endif /* CONFIG_IPIPE */
 
 	/* Stuff for accurate time accounting */

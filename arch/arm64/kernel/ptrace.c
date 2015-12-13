@@ -77,7 +77,7 @@ static void ptrace_hbptriggered(struct perf_event *bp,
 	};
 	int i __maybe_unused;
 
-	if (__ipipe_report_trap(IPIPE_TRAP_BREAK, regs))
+	if (dovetail_trap(IPIPE_TRAP_BREAK, regs))
 		return;
 
 #ifdef CONFIG_COMPAT

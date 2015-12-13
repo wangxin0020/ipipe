@@ -16,7 +16,6 @@
 #include <linux/err.h>
 #include <linux/list.h>
 #include <linux/interrupt.h>
-#include <linux/ipipe.h>
 
 #include <linux/irqchip/chained_irq.h>
 
@@ -1652,7 +1651,7 @@ static int pcs_irq_handle(struct pcs_soc_data *pcs_soc)
 		mask = pcs->read(pcswi->reg);
 		raw_spin_unlock(&pcs->lock);
 		if (mask & pcs_soc->irq_status_mask) {
-			ipipe_handle_demuxed_irq(irq_find_mapping(pcs->domain,
+			generic_handle_irq(irq_find_mapping(pcs->domain,
 							    pcswi->hwirq));
 			count++;
 		}

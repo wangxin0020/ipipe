@@ -65,7 +65,7 @@ extern struct thread_info *softirq_ctx[NR_CPUS];
 extern void irq_ctx_init(void);
 extern void call_do_softirq(struct thread_info *tp);
 extern void call_do_irq(struct pt_regs *regs, struct thread_info *tp);
-extern void do_IRQ(struct pt_regs *regs);
+extern int do_IRQ(struct pt_regs *regs);
 extern void __do_irq(struct pt_regs *regs);
 extern void ___do_irq(unsigned int irq, struct pt_regs *regs);
 

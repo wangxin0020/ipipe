@@ -550,7 +550,7 @@ ENTRY(_system_call)
 	p2 = [p2];
 
 	[p2+(TASK_THREAD+THREAD_KSP)] = sp;
-#ifdef CONFIG_IPIPE
+#ifdef CONFIG_DOVETAIL
 	p4 = p0
 	[--sp] = rets;
 	p0.l = ___ipipe_irq_tail_hook;
@@ -562,60 +562,61 @@ ENTRY(_system_call)
 	rets = [sp++];
 	p0 = p4
 	p2 = r7;
-	r0 = [p2+TI_IPIPE];
+	r0 = [p2+TI_LOCAL_FLAGS];
 	p4 = __NR_syscall;
 	cc = p4 <= p0;
 	if !cc jump slow_path;
-	cc = BITTST(r0,TIP_HEAD);
+	cc = BITTST(r0,TLF_HEAD);
 	if !cc jump slow_path
 	r0 = sp;
 	sp += -12;
-	pseudo_long_call _ipipe_fastcall_hook, p0;
+	pseudo_long_call _dovetail_fastcall_hook, p0;
 	sp += 12;
 	cc = r0 < 0;
 	if cc jump no_fastcall
 	p2 = r7;
-	r0 = [p2+TI_IPIPE];
-	cc = BITTST(r0,TIP_HEAD);
+	r0 = [p2+TI_LOCAL_FLAGS];
+	cc = BITTST(r0,TLF_HEAD);
 	if cc jump fast_exit_check
 	sp += -12;
-	pseudo_long_call ___ipipe_root_sync, p0;
+	pseudo_long_call _dovetail_root_sync, p0;
 	sp += 12;
 	jump .Lresume_userspace;
 fast_exit_check:
-	cc = BITTST(r0,TIP_MAYDAY);
+	r0 = [p2+TI_FLAGS];
+	cc = BITTST(r0,TIF_MAYDAY);
 	if !cc jump .Lsyscall_really_exit;
 	r0 = sp;
 	sp += -12;
-	pseudo_long_call ___ipipe_call_mayday, p0;
+	pseudo_long_call _dovetail_call_mayday, p0;
 	sp += 12;
 	jump .Lsyscall_really_exit;
 no_fastcall:
 	/* fastcall handler not implemented */
 	p0 = [sp + PT_ORIG_P0];
 	p2 = r7;
-	r0 = [p2+TI_IPIPE];
+	r0 = [p2+TI_LOCAL_FLAGS];
 slow_path:
-	cc = BITTST(r0,TIP_NOTIFY);
+	cc = BITTST(r0,TLF_DOVETAIL);
 	if cc jump pipeline_syscall
 	cc = p4 <= p0;
 	if !cc jump root_syscall;
 pipeline_syscall:
 	r0 = sp;
 	sp += -12;
-	pseudo_long_call ___ipipe_notify_syscall, p0;
+	pseudo_long_call _dovetail_handle_syscall_slow, p0;
 	sp += 12;
 	p2 = r7;
 	r1 = r0;
-	r0 = [p2+TI_IPIPE];
-	cc = BITTST(r0,TIP_HEAD);
+	r0 = [p2+TI_LOCAL_FLAGS];
+	cc = BITTST(r0,TLF_HEAD);
 	if cc jump .Lsyscall_really_exit;
 	cc = r1 == 0;
 	if !cc jump .Lresume_userspace;
 root_syscall:
 	r3 = [sp + PT_R3];
 	p0 = [sp + PT_ORIG_P0];
-#endif /* CONFIG_IPIPE */
+#endif /* CONFIG_DOVETAIL */
 	/* are we tracing syscalls?*/
 	p2 = r7;
 	r7 = [p2+TI_FLAGS];
@@ -678,7 +679,7 @@ root_syscall:
 	[--sp] = reti;
 	SP += 4; /* don't merge with next insn to keep the pattern obvious */
 	SP += -12;
-	pseudo_long_call ___ipipe_sync_root, p4;
+	pseudo_long_call _dovetail_sync_root, p4;
 	SP += 12;
 	jump .Lresume_userspace_1;
 .Lsyscall_no_irqsync:
@@ -945,8 +946,8 @@ _resume_kernel_from_int:
 	cc = r2 == 0;
 	/* Sync the root stage only from the outer interrupt level. */
 	if !cc jump .Lnosync;
-	r0.l = ___ipipe_sync_root;
-	r0.h = ___ipipe_sync_root;
+	r0.l = _dovetail_sync_root;
+	r0.h = _dovetail_sync_root;
 	[--sp] = reti;
 	[--sp] = rets;
 	[--sp] = ( r7:4, p5:3 );

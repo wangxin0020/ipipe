@@ -33,23 +33,81 @@
 
 extern void __replay_interrupt(unsigned int vector);
 
-extern void timer_interrupt(struct pt_regs *);
+extern void __timer_interrupt(void);
+extern int timer_interrupt(struct pt_regs *);
 extern void performance_monitor_exception(struct pt_regs *regs);
 extern void WatchdogException(struct pt_regs *regs);
 extern void unknown_exception(struct pt_regs *regs);
+
+static inline unsigned long native_save_flags(void)
+{
+	return mfmsr();
+}
+
+static inline bool native_irqs_disabled_flags(unsigned long flags)
+{
+	return !(flags & MSR_EE);
+}
+
+static inline bool native_irqs_disabled(void)
+{
+	unsigned long flags = native_save_flags();
+
+	return native_irqs_disabled_flags(flags);
+}
 
 #ifdef CONFIG_PPC64
 #include <asm/paca.h>
 
 #ifdef CONFIG_PPC_BOOK3E
-#define __hard_irq_enable()	asm volatile("wrteei 1" : : : "memory")
-#define __hard_irq_disable()	asm volatile("wrteei 0" : : : "memory")
-#else
+
+static inline void native_irq_disable(void)
+{
+	__asm__ __volatile__("wrteei 0": : :"memory");
+}
+
+static inline void native_irq_enable(void)
+{
+	__asm__ __volatile__("wrteei 1": : :"memory");
+}
+
+#define __hard_irq_enable()	native_irq_enable()
+#define __hard_irq_disable()	native_irq_disable()
+
+#else /* !CONFIG_PPC_BOOK3E */
+
+static inline void native_irq_disable(void)
+{
+	__mtmsrd(mfmsr() & ~MSR_EE, 1);
+}
+
+static inline void native_irq_enable(void)
+{
+	__mtmsrd(mfmsr() | MSR_EE, 1);
+}
+
 #define __hard_irq_enable()	__mtmsrd(local_paca->kernel_msr | MSR_EE, 1)
 #define __hard_irq_disable()	__mtmsrd(local_paca->kernel_msr, 1)
-#endif
 
-#ifndef CONFIG_IPIPE
+#endif /* CONFIG_PPC_BOOK3E */
+
+static inline unsigned long native_irq_save(void)
+{
+	unsigned long flags = mfmsr();
+
+	native_irq_disable();
+
+	return flags;
+}
+
+static inline void native_irq_restore(unsigned long flags)
+{
+	__mtmsrd(flags, 1);
+}
+
+#include <asm/irq_pipeline.h>
+
+#ifndef CONFIG_IRQ_PIPELINE
 
 #define hard_irq_disable()	do {			\
 	u8 _was_enabled;				\
@@ -103,6 +161,11 @@ static inline bool arch_irqs_disabled_flags(unsigned long flags)
 	return flags == 0;
 }
 
+static inline bool arch_irq_disabled_regs(struct pt_regs *regs)
+{
+	return !regs->softe;
+}
+
 static inline bool arch_irqs_disabled(void)
 {
 	return arch_irqs_disabled_flags(arch_local_save_flags());
@@ -125,107 +188,114 @@ static inline void may_hard_irq_enable(void)
 		__hard_irq_enable();
 }
 
-#else /* CONFIG_IPIPE */
-
-/*
- * The built-in soft disabling mechanism is diverted to the pipeline
- * when CONFIG_IPIPE is enabled, therefore we won't hard disable
- * waiting for soft enabling.
- */
-static inline bool lazy_irq_pending(void)
-{
-	return false;
-}
-
-static inline void may_hard_irq_enable(void) { }
-
-#define hard_irq_disable()	hard_local_irq_disable()
-
-#endif /* CONFIG_IPIPE */
-
-static inline bool arch_irq_disabled_regs(struct pt_regs *regs)
-{
-	return !regs->softe;
-}
+#endif /* CONFIG_IRQ_PIPELINE */
 
 extern bool prep_irq_for_idle(void);
 
-#else /* CONFIG_PPC64 */
+#else /* CONFIG_PPC32 */
+
+#ifdef CONFIG_BOOKE
+
+static inline void native_irq_disable(void)
+{
+	__asm__ __volatile__("wrteei 0": : :"memory");
+}
+
+static inline void native_irq_enable(void)
+{
+	__asm__ __volatile__("wrteei 1": : :"memory");
+}
+
+static inline void native_irq_restore(unsigned long flags)
+{
+	asm volatile("wrtee %0" : : "r" (flags) : "memory");
+}
+
+#else  /* !CONFIG_BOOKE */
 
 #define SET_MSR_EE(x)	mtmsr(x)
 
-#ifndef CONFIG_IPIPE
+static inline void native_irq_disable(void)
+{
+	unsigned long msr = mfmsr();
+	SET_MSR_EE(msr & ~MSR_EE);
+}
+
+static inline void native_irq_enable(void)
+{
+	unsigned long msr = mfmsr();
+	SET_MSR_EE(msr | MSR_EE);
+}
+
+static inline void native_irq_restore(unsigned long flags)
+{
+	mtmsr(flags);
+}
+
+#endif /* !CONFIG_BOOKE */
+
+static inline unsigned long native_irq_save(void)
+{
+	unsigned long flags = native_save_flags();
+
+	native_irq_disable();
+
+	return flags;
+}
+
+#include <asm/irq_pipeline.h>
+
+#ifndef CONFIG_IRQ_PIPELINE
 
 static inline unsigned long arch_local_save_flags(void)
 {
-	return mfmsr();
+	return native_save_flags();
 }
 
 static inline void arch_local_irq_restore(unsigned long flags)
 {
-#if defined(CONFIG_BOOKE)
-	asm volatile("wrtee %0" : : "r" (flags) : "memory");
-#else
-	mtmsr(flags);
-#endif
+	native_irq_restore(flags);
 }
 
 static inline unsigned long arch_local_irq_save(void)
 {
-	unsigned long flags = arch_local_save_flags();
-#ifdef CONFIG_BOOKE
-	asm volatile("wrteei 0" : : : "memory");
-#else
-	SET_MSR_EE(flags & ~MSR_EE);
-#endif
-	return flags;
+	return native_irq_save();
 }
 
 static inline void arch_local_irq_disable(void)
 {
-#ifdef CONFIG_BOOKE
-	asm volatile("wrteei 0" : : : "memory");
-#else
-	arch_local_irq_save();
-#endif
+	native_irq_disable();
 }
 
 static inline void arch_local_irq_enable(void)
 {
-#ifdef CONFIG_BOOKE
-	asm volatile("wrteei 1" : : : "memory");
-#else
-	unsigned long msr = mfmsr();
-	SET_MSR_EE(msr | MSR_EE);
-#endif
+	native_irq_enable();
 }
 
 static inline bool arch_irqs_disabled_flags(unsigned long flags)
 {
-	return (flags & MSR_EE) == 0;
+	return native_irqs_disabled_flags(flags);
+}
+
+static inline bool arch_irq_disabled_regs(struct pt_regs *regs)
+{
+	return native_irqs_disabled_flags(regs->msr);
 }
 
 static inline bool arch_irqs_disabled(void)
 {
-	return arch_irqs_disabled_flags(arch_local_save_flags());
+	return native_irqs_disabled();
 }
 
-#endif /* !CONFIG_IPIPE */
+#endif /* !CONFIG_IRQ_PIPELINE */
 
-#define hard_irq_disable()		hard_local_irq_disable()
-
-static inline bool arch_irq_disabled_regs(struct pt_regs *regs)
-{
-	return !(regs->msr & MSR_EE);
-}
+#define hard_irq_disable()		native_irq_disable()
 
 static inline void may_hard_irq_enable(void) { }
 
 #endif /* CONFIG_PPC64 */
 
 #define ARCH_IRQ_INIT_FLAGS	IRQ_NOREQUEST
-
-#include <asm/ipipe_hwirq.h>
 
 /*
  * interrupt-retrigger: should we handle this via lost interrupts and IPIs

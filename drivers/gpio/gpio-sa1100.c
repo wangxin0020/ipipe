@@ -11,7 +11,6 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/io.h>
-#include <linux/ipipe.h>
 #include <linux/syscore_ops.h>
 #include <mach/hardware.h>
 #include <mach/irqs.h>
@@ -189,7 +188,7 @@ sa1100_gpio_handler(unsigned int irq, struct irq_desc *desc)
 		irq = IRQ_GPIO0;
 		do {
 			if (mask & 1)
-				ipipe_handle_demuxed_irq(irq);
+				generic_handle_irq(irq);
 			mask >>= 1;
 			irq++;
 		} while (mask);

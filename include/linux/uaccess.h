@@ -2,6 +2,7 @@
 #define __LINUX_UACCESS_H__
 
 #include <linux/preempt.h>
+#include <linux/dovetail.h>
 #include <asm/uaccess.h>
 
 /*

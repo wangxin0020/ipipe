@@ -9,7 +9,6 @@ config 64BIT
 config X86_32
 	def_bool y
 	depends on !64BIT
-	select IPIPE_WANT_CLOCKSOURCE if IPIPE
 	select CLKSRC_I8253
 	select HAVE_UID16
 
@@ -24,9 +23,6 @@ config X86_64
 config X86
 	def_bool y
 	select ACPI_SYSTEM_POWER_STATES_SUPPORT if ACPI
-	select IPIPE_HAVE_HOSTRT if IPIPE
-	select IPIPE_HAVE_VM_NOTIFIER if IPIPE
-	select IPIPE_WANT_PTE_PINNING if IPIPE
 	select ARCH_MIGHT_HAVE_ACPI_PDC if ACPI
 	select ARCH_HAS_DEBUG_STRICT_USER_COPY_CHECKS
 	select ARCH_HAS_FAST_MULTIPLIER
@@ -102,6 +98,9 @@ config X86
 	select GENERIC_IRQ_SHOW
 	select GENERIC_CLOCKEVENTS_MIN_ADJUST
 	select IRQ_FORCED_THREADING
+	select DOVETAIL_HAVE_HOSTRT if DOVETAIL
+	select FORCE_COMMIT_MEMORY if IRQ_PIPELINE
+	select HAVE_IPIPE if X86_TSC && (X86_LOCAL_APIC || HPET_TIMER)
 	select HAVE_BPF_JIT if X86_64
 	select HAVE_ARCH_TRANSPARENT_HUGEPAGE
 	select HAVE_ARCH_HUGE_VMAP if X86_64 || (X86_32 && X86_PAE)
@@ -886,7 +885,7 @@ config SCHED_MC
 
 source "kernel/Kconfig.preempt"
 
-source "kernel/ipipe/Kconfig"
+source "kernel/Kconfig.dovetail"
 
 config UP_LATE_INIT
        def_bool y

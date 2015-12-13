@@ -81,7 +81,7 @@ aic5_handle(struct pt_regs *regs)
 	if (!irqstat)
 		irq_reg_writel(gc, 0, AT91_AIC5_EOICR);
 	else
-		ipipe_handle_domain_irq(aic5_domain, irqnr, regs);
+		handle_domain_irq(aic5_domain, irqnr, regs);
 }
 
 static void aic5_hard_mask(struct irq_chip_generic *gc, struct irq_data *d)

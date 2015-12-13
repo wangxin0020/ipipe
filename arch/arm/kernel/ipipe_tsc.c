@@ -3,9 +3,7 @@
 #include <linux/sched.h>
 #include <linux/timer.h>
 #include <linux/clocksource.h>
-#include <linux/ipipe_tickdev.h>
-
-#include <linux/ipipe.h>
+#include <linux/timekeeper_internal.h>
 
 #include <asm/cacheflush.h>
 #include <asm/traps.h>
@@ -36,8 +34,6 @@ struct ipipe_tsc_value_t {
 	unsigned long long last_tsc;
 	unsigned last_cnt;
 };
-
-unsigned long __ipipe_kuser_tsc_freq;
 
 struct ipipe_tsc_value_t *ipipe_tsc_value;
 static struct timer_list ipipe_tsc_update_timer;
@@ -146,7 +142,7 @@ void __init __ipipe_tsc_register(struct __ipipe_tscinfo *info)
 			   (unsigned long)(tsc_area + 0x80));
 	hard_local_irq_restore(flags);
 
-	__ipipe_kuser_tsc_freq = tsc_info.freq;
+	__ipipe_hrclock_freq = tsc_info.freq;
 
 	wrap_ms = info->u.mask;
 	do_div(wrap_ms, tsc_info.freq / 1000);
@@ -169,8 +165,6 @@ void __init __ipipe_tsc_register(struct __ipipe_tscinfo *info)
 	ipipe_tsc_update_timer.function = __ipipe_tsc_update_fn;
 	mod_timer(&ipipe_tsc_update_timer,
 		jiffies + ipipe_tsc_update_timer.data);
-
-	__ipipe_tracer_hrclock_initialized();
 }
 
 void __ipipe_mach_get_tscinfo(struct __ipipe_tscinfo *info)
@@ -199,7 +193,7 @@ EXPORT_SYMBOL(__ipipe_tsc_get);
 void __ipipe_update_vsyscall(struct timekeeper *tk)
 {
 	if (tk->tkr_mono.clock == &clksrc)
-		ipipe_update_hostrt(tk);
+		dovetail_update_hostrt(tk);
 }
 
 #if !IS_ENABLED(CONFIG_VDSO)

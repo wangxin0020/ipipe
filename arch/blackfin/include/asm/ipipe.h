@@ -28,7 +28,6 @@
 #include <linux/list.h>
 #include <linux/threads.h>
 #include <linux/irq.h>
-#include <linux/ipipe_domain.h>
 #include <asm/ptrace.h>
 #include <asm/irq.h>
 #include <asm/bitops.h>
@@ -40,11 +39,7 @@
 
 #ifdef CONFIG_SMP
 #error "I-pipe/blackfin: SMP not implemented"
-#else /* !CONFIG_SMP */
-#define ipipe_processor_id()	0
 #endif	/* CONFIG_SMP */
-
-struct ipipe_domain;
 
 struct ipipe_arch_sysinfo {
 };
@@ -64,45 +59,19 @@ struct ipipe_arch_sysinfo {
 	t;								\
 	})
 
-#define ipipe_cpu_freq()	__ipipe_core_clock
-
-#define __ipipe_hrclock_freq	__ipipe_core_clock
-
+#define ipipe_cpu_freq()	__ipipe_hrclock_freq
 #define ipipe_tsc2ns(_t)	(((unsigned long)(_t)) * __ipipe_freq_scale)
 #define ipipe_tsc2us(_t)	(ipipe_tsc2ns(_t) / 1000 + 1)
 
-static inline const char *ipipe_clock_name(void)
-{
-	return "cyclectr";
-}
-
 /* Private interface -- Internal use only */
 
-#define __ipipe_early_core_setup()	do { } while (0)
-
-/* enable/disable_irqdesc _must_ be used in pairs. */
-
-void __ipipe_enable_irqdesc(struct ipipe_domain *ipd,
-			    unsigned int irq);
-
-void __ipipe_disable_irqdesc(struct ipipe_domain *ipd,
-			     unsigned int irq);
-
-void __ipipe_enable_pipeline(void);
-
-#define __ipipe_hook_critical_ipi(ipd) do { } while (0)
-
-int __ipipe_get_irq_priority(unsigned int irq);
-
-void __ipipe_handle_irq(unsigned int irq, struct pt_regs *regs);
-
 void __ipipe_call_irqtail(unsigned long addr);
-
-extern unsigned long __ipipe_core_clock;
 
 extern unsigned long __ipipe_freq_scale;
 
 extern unsigned long __ipipe_irq_tail_hook;
+
+DECLARE_PER_CPU(int, __ipipe_defer_root_sync);
 
 #ifdef CONFIG_BF561
 #define bfin_write_TIMER_DISABLE(val)	bfin_write_TMRS8_DISABLE(val)
@@ -117,12 +86,6 @@ extern unsigned long __ipipe_irq_tail_hook;
 #endif
 
 #define __ipipe_root_tick_p(regs)	((regs->ipend & 0x10) != 0)
-
-static inline void ipipe_mute_pic(void) { }
-
-static inline void ipipe_unmute_pic(void) { }
-
-static inline void ipipe_notify_root_preemption(void) { }
 
 #endif /* CONFIG_IPIPE */
 

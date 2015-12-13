@@ -110,6 +110,12 @@ void math_emulate(struct math_emu_info *);
 asmlinkage void mce_threshold_interrupt(void);
 #endif
 asmlinkage void smp_thermal_interrupt(void);
+#ifdef CONFIG_X86_UV
+asmlinkage void uv_bau_message_interrupt(struct pt_regs *regs);
+#endif
+#ifdef CONFIG_X86_MCE_THRESHOLD
+asmlinkage void smp_threshold_interrupt(void);
+#endif
 
 extern enum ctx_state ist_enter(struct pt_regs *regs);
 extern void ist_exit(struct pt_regs *regs, enum ctx_state prev_state);
@@ -140,5 +146,28 @@ enum {
 	X86_TRAP_XF,		/* 19, SIMD Floating-Point Exception */
 	X86_TRAP_IRET = 32,	/* 32, IRET Exception */
 };
+
+#ifdef CONFIG_IRQ_PIPELINE
+int do_trap_prologue(struct pt_regs *regs, int trapnr,
+		     unsigned long *flags);
+
+#define handle_trap(__handler, __trapnr, __regs, __args...)		\
+({									\
+	unsigned long __flags;						\
+	int __ret = do_trap_prologue(__regs, __trapnr, &__flags); 	\
+	if (__ret <= 0) {						\
+		__handler(__regs, ##__args);				\
+		if (__ret == 0)						\
+			root_irq_restore_nosync(__flags);		\
+	}								\
+	__ret > 0;							\
+})
+#else
+#define handle_trap(__handler, __trapnr, __regs, __args...)		\
+({									\
+	__handler(__regs, ##__args);					\
+	0;								\
+})
+#endif
 
 #endif /* _ASM_X86_TRAPS_H */

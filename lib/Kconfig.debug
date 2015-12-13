@@ -363,7 +363,6 @@ config MAGIC_SYSRQ
 	  keys are documented in <file:Documentation/sysrq.txt>. Don't say Y
 	  unless you really know what this hack does.
 
-
 config MAGIC_SYSRQ_DEFAULT_ENABLE
 	hex "Enable magic SysRq key functions by default"
 	depends on MAGIC_SYSRQ
@@ -372,8 +371,6 @@ config MAGIC_SYSRQ_DEFAULT_ENABLE
 	  Specifies which SysRq key functions are enabled by default.
 	  This may be set to 1 or 0 to enable or disable them all, or
 	  to a bitmask as described in Documentation/sysrq.txt.
-
-source "kernel/ipipe/Kconfig.debug"
 
 config DEBUG_KERNEL
 	bool "Kernel debugging"
@@ -1196,7 +1193,7 @@ config DEBUG_CREDENTIALS
 menu "RCU Debugging"
 
 config PROVE_RCU
-	def_bool PROVE_LOCKING && !IPIPE
+	def_bool PROVE_LOCKING && !IRQ_PIPELINE
 
 config PROVE_RCU_REPEATEDLY
 	bool "RCU debugging: don't disable PROVE_RCU on first splat"
@@ -1775,6 +1772,26 @@ config MEMTEST
 	        ...
 	        memtest=17, mean do 17 test patterns.
 	  If you are unsure how to answer this question, answer N.
+
+config IRQ_PIPELINE_DEBUG
+	bool "Debug IRQ pipeline"
+	depends on IRQ_PIPELINE
+	select RAW_PRINTK
+	---help---
+	  Turn on this option for enabling debug checks related to
+	  interrupt pipelining, like interrupt state consistency and
+	  proper context isolation between the root and head stages.
+	  
+	  If unsure, say N.
+  
+config DOVETAIL_DEBUG
+	bool "Debug Dovetail interface"
+	select IRQ_PIPELINE_DEBUG
+	---help---
+	  Turn on this option for enabling debug checks related to
+	  running a dual kernel configuration, aka dovetailing. This
+	  option implicitly enables interrupt pipeline debugging
+	  features.
 
 source "samples/Kconfig"
 

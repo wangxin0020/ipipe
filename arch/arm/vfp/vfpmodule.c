@@ -104,11 +104,11 @@ static void vfp_thread_flush(struct thread_info *thread)
 	 * Do this first to ensure that preemption won't overwrite our
 	 * state saving should access to the VFP be enabled at this point.
 	 */
-	cpu = __ipipe_get_cpu(flags);
+	cpu = hard_get_cpu(flags);
 	if (vfp_current_hw_state[cpu] == vfp)
 		vfp_current_hw_state[cpu] = NULL;
 	fmxr(FPEXC, fmrx(FPEXC) & ~FPEXC_EN);
-	__ipipe_put_cpu(flags);
+	hard_put_cpu(flags);
 
 	memset(vfp, 0, sizeof(union vfp_state));
 
@@ -124,11 +124,11 @@ static void vfp_thread_exit(struct thread_info *thread)
 	/* release case: Per-thread VFP cleanup. */
 	union vfp_state *vfp = &thread->vfpstate;
 	unsigned long flags;
-	unsigned int cpu = __ipipe_get_cpu(flags);
+	unsigned int cpu = hard_get_cpu(flags);
 
 	if (vfp_current_hw_state[cpu] == vfp)
 		vfp_current_hw_state[cpu] = NULL;
-	__ipipe_put_cpu(flags);
+	hard_put_cpu(flags);
 }
 
 static void vfp_thread_copy(struct thread_info *thread)
@@ -529,7 +529,7 @@ static inline void vfp_pm_init(void) { }
 void vfp_sync_hwstate(struct thread_info *thread)
 {
 	unsigned long flags;
-	unsigned int cpu = __ipipe_get_cpu(flags);
+	unsigned int cpu = hard_get_cpu(flags);
 
 	if (vfp_state_in_hw(cpu, thread)) {
 		u32 fpexc = fmrx(FPEXC);
@@ -542,18 +542,18 @@ void vfp_sync_hwstate(struct thread_info *thread)
 		fmxr(FPEXC, fpexc);
 	}
 
-	__ipipe_put_cpu(flags);
+	hard_put_cpu(flags);
 }
 
 /* Ensure that the thread reloads the hardware VFP state on the next use. */
 void vfp_flush_hwstate(struct thread_info *thread)
 {
 	unsigned long flags;
-	unsigned int cpu = __ipipe_get_cpu(flags);
+	unsigned int cpu = hard_get_cpu(flags);
 
 	vfp_force_reload(cpu, thread);
 
-	__ipipe_put_cpu(flags);
+	hard_put_cpu(flags);
 }
 
 /*

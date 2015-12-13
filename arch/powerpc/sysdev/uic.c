@@ -66,7 +66,6 @@ static void uic_unmask_irq(struct irq_data *d)
 	er = mfdcr(uic->dcrbase + UIC_ER);
 	er |= sr;
 	mtdcr(uic->dcrbase + UIC_ER, er);
-	ipipe_unlock_irq(d->irq);
 	raw_spin_unlock_irqrestore(&uic->lock, flags);
 }
 
@@ -78,7 +77,6 @@ static void uic_mask_irq(struct irq_data *d)
 	u32 er;
 
 	raw_spin_lock_irqsave(&uic->lock, flags);
-	ipipe_lock_irq(d->irq);
 	er = mfdcr(uic->dcrbase + UIC_ER);
 	er &= ~(1 << (31 - src));
 	mtdcr(uic->dcrbase + UIC_ER, er);
@@ -173,6 +171,8 @@ static struct irq_chip uic_irq_chip = {
 	.irq_mask_ack	= uic_mask_ack_irq,
 	.irq_ack	= uic_ack_irq,
 	.irq_set_type	= uic_set_irq_type,
+	.irq_hold	= uic_mask_ack_irq,
+	.flags		= IRQCHIP_PIPELINE_SAFE,
 };
 
 static int uic_host_map(struct irq_domain *h, unsigned int virq,
@@ -205,16 +205,18 @@ void uic_irq_cascade(unsigned int virq, struct irq_desc *desc)
 	int src;
 	int subvirq;
 
-#ifndef CONFIG_IPIPE
-	raw_spin_lock(&desc->lock);
-	if (irqd_is_level_type(idata))
-		chip->irq_mask(idata);
-	else
-		chip->irq_mask_ack(idata);
-	raw_spin_unlock(&desc->lock);
-#else
-	chip->irq_mask_ack(idata);
-#endif
+	if (irqs_pipelined()) {
+		irq_chip_state_lock(desc);
+		chip->irq_hold(idata);
+		irq_chip_state_unlock(desc);
+	} else {
+		raw_spin_lock(&desc->lock);
+		if (irqd_is_level_type(idata))
+			chip->irq_mask(idata);
+		else
+			chip->irq_mask_ack(idata);
+		raw_spin_unlock(&desc->lock);
+	}
 
 	msr = mfdcr(uic->dcrbase + UIC_MSR);
 	if (!msr) /* spurious interrupt */
@@ -223,20 +225,21 @@ void uic_irq_cascade(unsigned int virq, struct irq_desc *desc)
 	src = 32 - ffs(msr);
 
 	subvirq = irq_linear_revmap(uic->irqhost, src);
-	ipipe_handle_demuxed_irq(subvirq);
+	generic_handle_irq(subvirq);
 
 uic_irq_ret:
-#ifndef CONFIG_IPIPE
-	raw_spin_lock(&desc->lock);
-	if (irqd_is_level_type(idata))
-		chip->irq_ack(idata);
-	if (!irqd_irq_disabled(idata) && chip->irq_unmask)
+	if (irqs_pipelined()) {
+		irq_chip_state_lock(desc);
 		chip->irq_unmask(idata);
-	raw_spin_unlock(&desc->lock);
-#else
-	if (chip->irq_unmask)
-		chip->irq_unmask(idata);
-#endif
+		irq_chip_state_unlock(desc);
+	} else {
+		raw_spin_lock(&desc->lock);
+		if (irqd_is_level_type(idata))
+			chip->irq_ack(idata);
+		if (!irqd_irq_disabled(idata) && chip->irq_unmask)
+			chip->irq_unmask(idata);
+		raw_spin_unlock(&desc->lock);
+	}
 }
 
 static struct uic * __init uic_init_one(struct device_node *node)

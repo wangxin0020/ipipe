@@ -27,7 +27,6 @@
 #include <linux/platform_device.h>
 #include <linux/syscore_ops.h>
 #include <linux/slab.h>
-#include <linux/ipipe.h>
 
 /*
  * We handle the GPIOs by banks, each bank covers up to 32 GPIOs with
@@ -423,7 +422,7 @@ static void pxa_gpio_demux_handler(unsigned int irq, struct irq_desc *desc)
 			for_each_set_bit(n, &gedr, BITS_PER_LONG) {
 				loop = 1;
 
-				ipipe_handle_demuxed_irq(gpio_to_irq(gpio_base + n));
+				generic_handle_irq(gpio_to_irq(gpio_base + n));
 			}
 		}
 	} while (loop);

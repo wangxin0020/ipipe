@@ -26,7 +26,7 @@ struct task_struct;
 
 #include <asm/types.h>
 #include <asm/domain.h>
-#include <ipipe/thread_info.h>
+#include <dovetail/thread_info.h>
 
 typedef unsigned long mm_segment_t;
 
@@ -50,6 +50,7 @@ struct cpu_context_save {
  */
 struct thread_info {
 	unsigned long		flags;		/* low level flags */
+	__u32			local_flags;	/* local (synchronous) flags */
 	int			preempt_count;	/* 0 => preemptable, <0 => bug */
 	mm_segment_t		addr_limit;	/* address limit */
 	struct task_struct	*task;		/* main task structure */
@@ -67,16 +68,14 @@ struct thread_info {
 #ifdef CONFIG_ARM_THUMBEE
 	unsigned long		thumbee_state;	/* ThumbEE Handler Base register */
 #endif
-#ifdef CONFIG_IPIPE
-	unsigned long		ipipe_flags;
-#endif
-	struct ipipe_threadinfo ipipe_data;
+	struct dovetail_thread_state dovetail_state;
 };
 
 #define INIT_THREAD_INFO(tsk)						\
 {									\
 	.task		= &tsk,						\
 	.flags		= 0,						\
+	.local_flags	= 0,						\
 	.preempt_count	= INIT_PREEMPT_COUNT,				\
 	.addr_limit	= KERNEL_DS,					\
 	.cpu_domain	= domain_val(DOMAIN_USER, DOMAIN_MANAGER) |	\
@@ -165,6 +164,7 @@ extern int vfp_restore_user_hwstate(struct user_vfp __user *,
 
 #define TIF_SWITCHED		23 	/* FCSE */
 #define TIF_MMSWITCH_INT	24	/* MMU context switch preempted */
+#define TIF_MAYDAY		25	/* emergency trap pending */
 
 #define _TIF_SIGPENDING		(1 << TIF_SIGPENDING)
 #define _TIF_NEED_RESCHED	(1 << TIF_NEED_RESCHED)
@@ -178,6 +178,7 @@ extern int vfp_restore_user_hwstate(struct user_vfp __user *,
 
 #define _TIF_SWITCHED		(1 << TIF_SWITCHED)
 #define _TIF_MMSWITCH_INT	(1 << TIF_MMSWITCH_INT)
+#define _TIF_MAYDAY		(1 << TIF_MAYDAY)
 
 /* Checks for any syscall work in entry-common.S */
 #define _TIF_SYSCALL_WORK (_TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT | \
@@ -189,14 +190,13 @@ extern int vfp_restore_user_hwstate(struct user_vfp __user *,
 #define _TIF_WORK_MASK		(_TIF_NEED_RESCHED | _TIF_SIGPENDING | \
 				 _TIF_NOTIFY_RESUME | _TIF_UPROBE)
 
-/* ti->ipipe_flags */
-#define TIP_MAYDAY	0	/* MAYDAY call is pending */
-#define TIP_NOTIFY	1	/* Notify head domain about kernel events */
-#define TIP_HEAD	2	/* Runs in head domain */
+/* Local (synchronous) thread flags. */
 
-#define _TIP_MAYDAY	(1 << TIP_MAYDAY)
-#define _TIP_NOTIFY	(1 << TIP_NOTIFY)
-#define _TIP_HEAD	(1 << TIP_HEAD)
+#define TLF_DOVETAIL		0	/* notify head domain about kernel events */
+#define TLF_HEAD		1	/* runs in head domain */
+
+#define _TLF_DOVETAIL		(1 << TLF_DOVETAIL)
+#define _TLF_HEAD		(1 << TLF_HEAD)
 
 #endif /* __KERNEL__ */
 #endif /* __ASM_ARM_THREAD_INFO_H */

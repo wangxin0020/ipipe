@@ -39,7 +39,7 @@ static inline unsigned long ipipe_fault_entry(void)
 	int s;
 
 	flags = hard_local_irq_save();
-	s = __test_and_set_bit(IPIPE_STALL_FLAG, &__ipipe_root_status);
+	s = __test_and_set_bit(IPIPE_STALL_FLAG, &irq_root_status);
 	hard_local_irq_enable();
 
 	return arch_mangle_irq_bits(s, flags);
@@ -304,7 +304,7 @@ do_page_fault(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 	unsigned long irqflags;
 
-	if (__ipipe_report_trap(IPIPE_TRAP_ACCESS, regs))
+	if (dovetail_trap(IPIPE_TRAP_ACCESS, regs))
 		return 0;
 
 	irqflags = ipipe_fault_entry();
@@ -478,7 +478,7 @@ do_translation_fault(unsigned long addr, unsigned int fsr,
 	pud_t *pud, *pud_k;
 	pmd_t *pmd, *pmd_k;
 
-	IPIPE_BUG_ON(!hard_irqs_disabled());
+	BUG_ON(irq_pipeline_debug() && !hard_irqs_disabled());
 
 	if (addr < TASK_SIZE)
 		return do_page_fault(addr, fsr, regs);
@@ -531,7 +531,7 @@ do_translation_fault(unsigned long addr, unsigned int fsr,
 	return 0;
 
 bad_area:
-	if (__ipipe_report_trap(IPIPE_TRAP_ACCESS, regs))
+	if (dovetail_trap(IPIPE_TRAP_ACCESS, regs))
 		return 0;
 
 	irqflags = ipipe_fault_entry();
@@ -561,7 +561,7 @@ do_sect_fault(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 {
 	unsigned long irqflags;
 
-	if (__ipipe_report_trap(IPIPE_TRAP_SECTION, regs))
+	if (dovetail_trap(IPIPE_TRAP_SECTION, regs))
 		return 0;
 
 	irqflags = ipipe_fault_entry();
@@ -580,7 +580,7 @@ do_sect_fault(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 static int
 do_bad(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 {
-	if (__ipipe_report_trap(IPIPE_TRAP_DABT,regs))
+	if (dovetail_trap(IPIPE_TRAP_DABT,regs))
 		return 0;
 
 	return 1;
@@ -628,7 +628,7 @@ do_DataAbort(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 	if (!inf->fn(addr, fsr & ~FSR_LNX_PF, regs))
 		return;
 
-	if (__ipipe_report_trap(IPIPE_TRAP_UNKNOWN, regs))
+	if (dovetail_trap(IPIPE_TRAP_UNKNOWN, regs))
 		return;
 
 	irqflags = ipipe_fault_entry();
@@ -669,7 +669,7 @@ do_PrefetchAbort(unsigned long addr, unsigned int ifsr, struct pt_regs *regs)
 	if (!inf->fn(addr, ifsr | FSR_LNX_PF, regs))
 		return;
 
-	if (__ipipe_report_trap(IPIPE_TRAP_UNKNOWN, regs))
+	if (dovetail_trap(IPIPE_TRAP_UNKNOWN, regs))
 		return;
 
 	irqflags = ipipe_fault_entry();

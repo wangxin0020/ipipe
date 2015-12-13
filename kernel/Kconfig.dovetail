@@ -1,0 +1,17 @@
+
+config DOVETAIL
+	bool "Dovetail interface"
+	select IRQ_PIPELINE
+	select FORCE_COMMIT_MEMORY
+	default y
+	---help---
+	  Activate this option if you want to enable the interface for
+	  running a secondary kernel side-by-side with Linux (aka
+	  "dual kernel" configuration).
+
+config DOVETAIL_HAVE_HOSTRT
+       bool
+
+config DOVETAIL_TRACK_VM_GUEST
+	bool
+	default y if KVM

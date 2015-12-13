@@ -42,7 +42,6 @@
 #include <asm/paravirt.h>
 #include <asm/percpu.h>
 #include <asm/asm.h>
-#include <asm/ipipe_base.h>
 #include <asm/context_tracking.h>
 #include <asm/smap.h>
 #include <asm/pgtable_types.h>
@@ -55,10 +54,7 @@
 #define __AUDIT_ARCH_LE	   0x40000000
 
 #ifdef CONFIG_IPIPE
-#define PREEMPT_SCHEDULE_IRQ	call __ipipe_preempt_schedule_irq
 #define machine_check_vector	__ipipe_machine_check_vector
-#else /* !CONFIG_IPIPE */
-#define PREEMPT_SCHEDULE_IRQ	call preempt_schedule_irq
 #endif /* !CONFIG_IPIPE */
 
 .macro test_syscall_nr, reg
@@ -264,37 +260,37 @@ GLOBAL(system_call_after_swapgs)
 	sub	$(6*8),%rsp /* pt_regs->bp,bx,r12-15 not saved */
 	CFI_ADJUST_CFA_OFFSET 6*8
 
-#ifdef CONFIG_IPIPE
+#ifdef CONFIG_DOVETAIL
 	test_syscall_nr ax
 	jb slow_path
-	testl $_TIP_HEAD, ASM_THREAD_INFO(TI_ipipe, %rsp, SIZEOF_PTREGS)
+	testl $_TLF_HEAD, ASM_THREAD_INFO(TI_status, %rsp, SIZEOF_PTREGS)
 	jz slow_path
 	leaq (%rsp),%rdi
-	call ipipe_fastcall_hook
+	call dovetail_fastcall_hook
 	testl %eax, %eax
 	js no_fastcall
-	testl $_TIP_HEAD, ASM_THREAD_INFO(TI_ipipe, %rsp, SIZEOF_PTREGS)
+	testl $_TLF_HEAD, ASM_THREAD_INFO(TI_status, %rsp, SIZEOF_PTREGS)
 	jz root_fastexit
-	testl $_TIP_MAYDAY, ASM_THREAD_INFO(TI_ipipe, %rsp, SIZEOF_PTREGS)
+	testl $_TIF_MAYDAY, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	jz pipeline_leave
 	leaq (%rsp),%rdi
-	call __ipipe_call_mayday
+	call dovetail_call_mayday
 	jmp pipeline_leave
 root_fastexit:
-	call __ipipe_root_sync
+	call dovetail_root_sync
 	jmp ret_from_sys_call
 no_fastcall:
 	/* fastcall handler not implemented */
 	movq ORIG_RAX(%rsp), %rax
 slow_path:
-	testl $_TIP_NOTIFY, ASM_THREAD_INFO(TI_ipipe, %rsp, SIZEOF_PTREGS)
+	testl $_TLF_DOVETAIL, ASM_THREAD_INFO(TI_status, %rsp, SIZEOF_PTREGS)
 	jnz pipeline_syscall
 	test_syscall_nr ax
 	jb root_syscall
 pipeline_syscall:
 	leaq (%rsp),%rdi	# regs for handler
-	call __ipipe_notify_syscall
-	testl $_TIP_HEAD, ASM_THREAD_INFO(TI_ipipe,  %rsp, SIZEOF_PTREGS)
+	call dovetail_handle_syscall_slow
+	testl $_TLF_HEAD, ASM_THREAD_INFO(TI_status,  %rsp, SIZEOF_PTREGS)
 	jz root_domain
 pipeline_leave:
 	DISABLE_INTERRUPTS(CLBR_NONE)
@@ -312,7 +308,8 @@ root_syscall:
 	movq R10(%rsp), %r10
 	movq R9(%rsp), %r9
 	movq R8(%rsp), %r8
-#endif /* !CONFIG_IPIPE */
+#endif /* CONFIG_DOVETAIL */
+
 	testl $_TIF_WORK_SYSCALL_ENTRY, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	jnz tracesys
 system_call_fastpath:
@@ -687,7 +684,7 @@ ENTRY(ret_from_fork)
 
 	pushq_cfi $0x0002
 	popfq_cfi				# reset kernel eflags
-	HARD_COND_ENABLE_INTERRUPTS
+	ENABLE_INTERRUPTS_IF_PIPELINED(CLBR_RAX)
 
 	call schedule_tail			# rdi: 'prev' task parameter
 
@@ -788,31 +785,7 @@ END(irq_entries_start)
 #ifndef CONFIG_IPIPE
 	TRACE_IRQS_OFF
 #endif
-#ifdef CONFIG_IPIPE_TRACE_IRQSOFF
-	/* pt_regs is %rdi (clobbered in the following) or %rsp + 8-RBP */
-	movq ORIG_RAX+8-RBP(%rsp), %rdi # IRQ number...
-	notq %rdi			# ...is inverted, fix up
-	leaq RIP-8+8-RBP(%rsp), %rbp    # Show interrupted address in trace
-	call ipipe_trace_begin
-
-	/* Restore original content of %rdi and %rbp for the interrupt handler */
-	leaq 8-RBP(%rsp), %rdi
-	movq RBP+8-RBP(%rsp), %rbp
-
 	call \func
-
-	/* Show IRQ number and interrupted address in the trace, as before */
-	movq ORIG_RAX+8-RBP(%rsp), %rdi
-	notq %rdi
-	leaq RIP-8+8-RBP(%rsp), %rbp
-
-	pushq %rax
-	call ipipe_trace_end
-	popq %rax
-	movq RBP+8-RBP(%rsp), %rbp
-#else
-	call \func
-#endif
 	.endm
 
 	/*
@@ -825,7 +798,7 @@ common_interrupt:
 	ASM_CLAC
 	addq $-0x80,(%rsp)		/* Adjust vector to [-256,-1] range */
 #ifdef CONFIG_IPIPE
-	interrupt __ipipe_handle_irq
+	interrupt enter_irq_pipeline
 	testl %eax, %eax
 	jnz ret_from_intr
 	decl PER_CPU_VAR(irq_count)
@@ -886,7 +859,7 @@ retint_swapgs_notrace:
 #ifdef CONFIG_IPIPE
 .Lunwind_root_irq:
 	DISABLE_INTERRUPTS(CLBR_NONE)
-	retq	/* back to __ipipe_do_IRQ() */
+	retq	/* back to do_IRQ_pipelined() */
 
 ENTRY(do_root_irq)
 	movq	%rsp, %rax
@@ -922,7 +895,7 @@ retint_kernel:
 	cmpl	$0,PER_CPU_VAR(irq_count)
 	jge	1f
 #endif
-	PREEMPT_SCHEDULE_IRQ
+	call	preempt_schedule_irq
 	jmp	0b
 1:
 #endif
@@ -1030,7 +1003,7 @@ ENTRY(\sym)
 	ASM_CLAC
 	pushq_cfi $~(\num)
 .Lcommon_\sym:
-	interrupt __ipipe_handle_irq
+	interrupt enter_irq_pipeline
 	testl %eax, %eax
 	jnz ret_from_intr
 	decl PER_CPU_VAR(irq_count)
@@ -1321,22 +1294,17 @@ ENTRY(do_softirq_own_stack)
 	CFI_REL_OFFSET rbp,0
 	mov  %rsp,%rbp
 	CFI_DEF_CFA_REGISTER rbp
-	HARD_COND_DISABLE_INTERRUPTS
 	incl PER_CPU_VAR(irq_count)
 	cmove PER_CPU_VAR(irq_stack_ptr),%rsp
-	HARD_COND_ENABLE_INTERRUPTS
 	push  %rbp			# backlink for old unwinder
 	call __do_softirq
-	HARD_COND_DISABLE_INTERRUPTS
 	leaveq
 	CFI_RESTORE		rbp
 	CFI_DEF_CFA_REGISTER	rsp
 	CFI_ADJUST_CFA_OFFSET   -8
 	decl PER_CPU_VAR(irq_count)
-	HARD_COND_ENABLE_INTERRUPTS
 	ret
 	CFI_ENDPROC
-END(do_softirq_own_stack)
 
 #ifdef CONFIG_XEN
 idtentry xen_hypervisor_callback xen_do_hypervisor_callback has_error_code=0

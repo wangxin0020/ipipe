@@ -18,20 +18,14 @@
 
 #ifdef __KERNEL__
 
+#include <linux/types.h>
 #include <asm/ptrace.h>
 
-#include <asm/ipipe_hwirq.h>
-
-#ifndef CONFIG_IPIPE
-
-/*
- * CPU interrupt mask handling.
- */
-static inline unsigned long arch_local_irq_save(void)
+static inline unsigned long native_irq_save(void)
 {
 	unsigned long flags;
 	asm volatile(
-		"mrs	%0, daif		// arch_local_irq_save\n"
+		"mrs	%0, daif		// native_irq_save\n"
 		"msr	daifset, #2"
 		: "=r" (flags)
 		:
@@ -39,46 +33,36 @@ static inline unsigned long arch_local_irq_save(void)
 	return flags;
 }
 
-static inline void arch_local_irq_enable(void)
+static inline void native_irq_enable(void)
 {
 	asm volatile(
-		"msr	daifclr, #2		// arch_local_irq_enable"
+		"msr	daifclr, #2		// native_irq_enable"
 		:
 		:
 		: "memory");
 }
 
-static inline void arch_local_irq_disable(void)
+static inline void native_irq_disable(void)
 {
 	asm volatile(
-		"msr	daifset, #2		// arch_local_irq_disable"
+		"msr	daifset, #2		// native_irq_disable"
 		:
 		:
 		: "memory");
 }
 
-#define local_fiq_enable()	asm("msr	daifclr, #1" : : : "memory")
-#define local_fiq_disable()	asm("msr	daifset, #1" : : : "memory")
-
-
-/*
- * Save the current interrupt enable state.
- */
-static inline unsigned long arch_local_save_flags(void)
+static inline unsigned long native_save_flags(void)
 {
 	unsigned long flags;
 	asm volatile(
-		"mrs	%0, daif		// arch_local_save_flags"
+		"mrs	%0, daif		// native_save_flags"
 		: "=r" (flags)
 		:
 		: "memory");
 	return flags;
 }
 
-/*
- * restore saved IRQ state
- */
-static inline void arch_local_irq_restore(unsigned long flags)
+static inline void native_irq_restore(unsigned long flags)
 {
 	asm volatile(
 		"msr	daif, %0		// arch_local_irq_restore"
@@ -87,12 +71,61 @@ static inline void arch_local_irq_restore(unsigned long flags)
 	: "memory");
 }
 
-static inline int arch_irqs_disabled_flags(unsigned long flags)
+static inline bool native_irqs_disabled_flags(unsigned long flags)
 {
 	return flags & PSR_I_BIT;
 }
 
-#endif /* CONFIG_IPIPE */
+static inline bool native_irqs_disabled(void)
+{
+	unsigned long flags = native_save_flags();
+	return native_irqs_disabled_flags(flags);
+}
+
+#include <asm/irq_pipeline.h>
+
+#ifndef CONFIG_IRQ_PIPELINE
+/*
+ * CPU interrupt mask handling.
+ */
+static inline unsigned long arch_local_irq_save(void)
+{
+	return native_irq_save();
+}
+
+static inline void arch_local_irq_enable(void)
+{
+	native_irq_enable();
+}
+
+static inline void arch_local_irq_disable(void)
+{
+	native_irq_disable();
+}
+
+/*
+ * Save the current interrupt enable state.
+ */
+static inline unsigned long arch_local_save_flags(void)
+{
+	return native_save_flags();
+}
+
+/*
+ * restore saved IRQ state
+ */
+static inline void arch_local_irq_restore(unsigned long flags)
+{
+	native_irq_restore(flags);
+}
+
+static inline int arch_irqs_disabled_flags(unsigned long flags)
+{
+	return native_irqs_disabled_flags(flags);
+}
+
+#endif /* !CONFIG_IRQ_PIPELINE */
+
 /*
  * save and restore debug state
  */
@@ -115,6 +148,9 @@ static inline int arch_irqs_disabled_flags(unsigned long flags)
 
 #define local_dbg_enable()	asm("msr	daifclr, #8" : : : "memory")
 #define local_dbg_disable()	asm("msr	daifset, #8" : : : "memory")
+
+#define local_fiq_enable()	asm("msr	daifclr, #1" : : : "memory")
+#define local_fiq_disable()	asm("msr	daifset, #1" : : : "memory")
 
 #define local_async_enable()	asm("msr	daifclr, #4" : : : "memory")
 #define local_async_disable()	asm("msr	daifset, #4" : : : "memory")

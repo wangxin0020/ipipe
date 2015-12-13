@@ -4,7 +4,6 @@
 #include <asm/desc_defs.h>
 #include <asm/ldt.h>
 #include <asm/mmu.h>
-#include <asm/hw_irq.h>
 
 #include <linux/smp.h>
 #include <linux/percpu.h>
@@ -383,13 +382,6 @@ extern unsigned long used_vectors[];
 static inline void alloc_system_vector(int vector)
 {
 	if (!test_bit(vector, used_vectors)) {
-#if defined(CONFIG_X86_LOCAL_APIC) && defined(CONFIG_IPIPE)
-		unsigned cpu;
-
-		for_each_possible_cpu(cpu)
-			per_cpu(vector_irq, cpu)[vector] =
-				ipipe_apic_vector_irq(vector);
-#endif
 		set_bit(vector, used_vectors);
 		if (first_system_vector > vector)
 			first_system_vector = vector;

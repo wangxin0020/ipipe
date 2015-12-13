@@ -34,7 +34,6 @@
 #include <linux/uaccess.h>
 #include <linux/irq.h>
 #include <linux/interrupt.h>
-#include <linux/ipipe.h>
 
 
 #include "omap_hwmod.h"
@@ -395,7 +394,7 @@ static bool omap_hwmod_mux_scan_wakeups(struct omap_hwmod_mux_info *hmux,
 
 		handled_irqs |= 1 << irq;
 
-		ipipe_handle_demuxed_irq(mpu_irqs[irq].irq);
+		generic_handle_irq(mpu_irqs[irq].irq);
 	}
 
 	return false;
@@ -412,7 +411,7 @@ static int _omap_hwmod_mux_handle_irq(struct omap_hwmod *oh, void *data)
 	if (!oh->mux || !oh->mux->enabled)
 		return 0;
 	if (omap_hwmod_mux_scan_wakeups(oh->mux, oh->mpu_irqs))
-		ipipe_handle_demuxed_irq(oh->mpu_irqs[0].irq);
+		generic_handle_irq(oh->mpu_irqs[0].irq);
 	return 0;
 }
 

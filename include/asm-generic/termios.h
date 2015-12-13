@@ -2,6 +2,7 @@
 #define _ASM_GENERIC_TERMIOS_H
 
 
+#include <linux/dovetail.h>
 #include <asm/uaccess.h>
 #include <uapi/asm-generic/termios.h>
 

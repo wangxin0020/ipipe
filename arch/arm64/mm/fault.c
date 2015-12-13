@@ -106,7 +106,7 @@ static void __do_kernel_fault(struct mm_struct *mm, unsigned long addr,
 	if (ret)
 		return;
 
-	if (__ipipe_report_trap(IPIPE_TRAP_ACCESS, regs))
+	if (dovetail_trap(IPIPE_TRAP_ACCESS, regs))
 		return;
 
 	/*
@@ -133,7 +133,7 @@ static void __do_user_fault(struct task_struct *tsk, unsigned long addr,
 {
 	struct siginfo si;
 
-	if (__ipipe_report_trap(IPIPE_TRAP_ACCESS, regs))
+	if (dovetail_trap(IPIPE_TRAP_ACCESS, regs))
 		return;
 
 	if (show_unhandled_signals && unhandled_signal(tsk, sig) &&
@@ -221,7 +221,7 @@ static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
 	unsigned long vm_flags = VM_READ | VM_WRITE | VM_EXEC;
 	unsigned int mm_flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 
-	if (__ipipe_report_trap(IPIPE_TRAP_ACCESS, regs))
+	if (dovetail_trap(IPIPE_TRAP_ACCESS, regs))
 		return 0;
 
 	tsk = current;
@@ -395,7 +395,7 @@ static int __kprobes do_translation_fault(unsigned long addr,
  */
 static int do_bad(unsigned long addr, unsigned int esr, struct pt_regs *regs)
 {
-	if (__ipipe_report_trap(IPIPE_TRAP_DABT, regs))
+	if (dovetail_trap(IPIPE_TRAP_DABT, regs))
 		return 0;
 
 	return 1;
@@ -488,12 +488,12 @@ asmlinkage void __exception do_mem_abort(unsigned long addr, unsigned int esr,
 	const struct fault_info *inf = fault_info + (esr & 63);
 	struct siginfo info;
 
-	IPIPE_WARN_ONCE(hard_irqs_disabled());
+	WARN_ON_ONCE(irq_pipeline_debug() && hard_irqs_disabled());
 
 	if (!inf->fn(addr, esr, regs))
 		return;
 
-	if (__ipipe_report_trap(IPIPE_TRAP_UNKNOWN, regs))
+	if (dovetail_trap(IPIPE_TRAP_UNKNOWN, regs))
 		return;
 
 	pr_alert("Unhandled fault: %s (0x%08x) at 0x%016lx\n",
@@ -515,7 +515,7 @@ asmlinkage void __exception do_sp_pc_abort(unsigned long addr,
 {
 	struct siginfo info;
 
-	if (__ipipe_report_trap(IPIPE_TRAP_ALIGNMENT, regs))
+	if (dovetail_trap(IPIPE_TRAP_ALIGNMENT, regs))
 		return;
 
 	info.si_signo = SIGBUS;
@@ -558,7 +558,7 @@ asmlinkage int __exception do_debug_exception(unsigned long addr,
 	if (!inf->fn(addr, esr, regs))
 		return 1;
 
-	if (__ipipe_report_trap(IPIPE_TRAP_UNKNOWN, regs))
+	if (dovetail_trap(IPIPE_TRAP_UNKNOWN, regs))
 		return 0;
 
 	pr_alert("Unhandled debug exception: %s (0x%08x) at 0x%016lx\n",

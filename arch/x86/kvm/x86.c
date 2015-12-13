@@ -40,7 +40,6 @@
 #include <linux/iommu.h>
 #include <linux/intel-iommu.h>
 #include <linux/cpufreq.h>
-#include <linux/ipipe.h>
 #include <linux/user-return-notifier.h>
 #include <linux/srcu.h>
 #include <linux/slab.h>
@@ -212,7 +211,7 @@ static void kvm_on_user_return(struct user_return_notifier *urn)
 	kvm_restore_shared_msrs(locals);
 	locals->registered = false;
 	user_return_notifier_unregister(urn);
-	__ipipe_exit_vm();
+	dovetail_exit_vm_guest();
 }
 
 static void shared_msr_update(unsigned slot, u32 msr)
@@ -3000,26 +2999,30 @@ void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu)
 	vcpu->arch.last_host_tsc = native_read_tsc();
 
 	if (!smsr->dirty)
-		__ipipe_exit_vm();
+		dovetail_exit_vm_guest();
 
 	hard_cond_local_irq_restore(flags);
 }
 
-#ifdef CONFIG_IPIPE
-
-void __ipipe_handle_vm_preemption(struct ipipe_vm_notifier *nfy)
+#ifdef CONFIG_DOVETAIL
+static void handle_kvm_stall(struct hypervisor_stall *nfy)
 {
 	unsigned int cpu = raw_smp_processor_id();
 	struct kvm_shared_msrs *smsr = per_cpu_ptr(shared_msrs, cpu);
 	struct kvm_vcpu *vcpu;
 
-	vcpu = container_of(nfy, struct kvm_vcpu, ipipe_notifier);
+	/* Called when the host CPU switched to the head stage. */
+	vcpu = container_of(nfy, struct kvm_vcpu, stall_notifier);
 	kvm_arch_vcpu_put(vcpu);
 	kvm_restore_shared_msrs(smsr);
-	__ipipe_exit_vm();
+	dovetail_exit_vm_guest();
 }
-EXPORT_SYMBOL_GPL(__ipipe_handle_vm_preemption);
-
+static inline void kvm_dovetail_init(struct kvm_vcpu *vcpu)
+{
+	vcpu->stall_notifier.handler = handle_kvm_stall;
+}
+#else
+static inline void kvm_dovetail_init(struct kvm_vcpu *vcpu) { }
 #endif
 
 static int kvm_vcpu_ioctl_get_lapic(struct kvm_vcpu *vcpu,
@@ -6364,7 +6367,7 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	local_irq_disable();
 	hard_cond_local_irq_disable();
 
-	__ipipe_enter_vm(&vcpu->ipipe_notifier);
+	dovetail_enter_vm_guest(&vcpu->stall_notifier);
 
 	kvm_x86_ops->prepare_guest_switch(vcpu);
 	if (vcpu->fpu_active)
@@ -7425,6 +7428,7 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 
 	kvm_async_pf_hash_reset(vcpu);
 	kvm_pmu_init(vcpu);
+	kvm_dovetail_init(vcpu);
 
 	return 0;
 fail_free_wbinvd_dirty_mask:

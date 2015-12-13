@@ -17,7 +17,6 @@
 #include <linux/module.h>
 #include <linux/smp.h>
 #include <linux/device.h>
-#include <linux/ipipe_tickdev.h>
 
 #include "tick-internal.h"
 
@@ -483,8 +482,6 @@ void clockevents_register_device(struct clock_event_device *dev)
 	/* Initialize state to DETACHED */
 	dev->state = CLOCK_EVT_STATE_DETACHED;
 
-	ipipe_host_timer_register(dev);
-
 	if (!dev->cpumask) {
 		WARN_ON(num_possible_cpus() > 1);
 		dev->cpumask = cpumask_of(smp_processor_id());
@@ -640,6 +637,42 @@ void clockevents_resume(void)
 		if (dev->resume)
 			dev->resume(dev);
 }
+
+#ifdef CONFIG_IRQ_PIPELINE
+
+void clockevents_handle_event(struct clock_event_device *ced)
+{
+	if (__on_root_stage()) {
+		ced->event_handler(ced);
+		return;
+	}
+
+	/*
+	 * We have been called from a high-precision timer event
+	 * handler running over the head stage context. if ced is
+	 * still the regular tick device for the current CPU, then
+	 * such CPU can't be processing high-precision events, so just
+	 * relay them to the root stage.
+	 *
+	 * This situation can happen when all CPUs receive the same
+	 * (pipelined) IRQ from a given clock event device, but only a
+	 * subset of the online CPUs is actually interested in
+	 * high-precision events from that device.
+	 */
+	if (ced == raw_cpu_ptr(&tick_cpu_device)->evtdev)
+		irq_stage_post_root(ced->irq);
+	else	/* High-precision tick handled by the co-kernel. */
+		ced->event_handler(ced);
+}
+EXPORT_SYMBOL_GPL(clockevents_handle_event);
+
+struct clock_event_device *clockevents_get_device(int cpu)
+{
+	return tick_get_device(cpu)->evtdev;
+}
+EXPORT_SYMBOL_GPL(clockevents_get_device);
+
+#endif	/* IRQ_PIPELINE */
 
 #ifdef CONFIG_HOTPLUG_CPU
 /**

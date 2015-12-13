@@ -19,10 +19,7 @@
 #include <linux/err.h>
 #include <linux/platform_device.h>
 #include <linux/sched_clock.h>
-#ifdef CONFIG_IPIPE
-#include <linux/ipipe.h>
 #include <linux/ipipe_tickdev.h>
-#endif /* CONFIG_IPIPE */
 
 #include <asm/mach/irq.h>
 #include <asm/mach/time.h>

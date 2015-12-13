@@ -42,7 +42,6 @@
 #include <linux/platform_device.h>
 #include <linux/platform_data/dmtimer-omap.h>
 #include <linux/sched_clock.h>
-#include <linux/ipipe.h>
 #include <linux/export.h>
 #include <linux/ipipe_tickdev.h>
 

@@ -5,10 +5,6 @@
 
 #include <asm/ptrace.h>
 
-#include <asm/ipipe_hwirq.h>
-
-#ifndef CONFIG_IPIPE
-
 /*
  * CPU interrupt mask handling.
  */
@@ -24,30 +20,30 @@
 
 #if __LINUX_ARM_ARCH__ >= 6
 
-static inline unsigned long arch_local_irq_save(void)
+static inline unsigned long native_irq_save(void)
 {
 	unsigned long flags;
 
 	asm volatile(
-		"	mrs	%0, " IRQMASK_REG_NAME_R "	@ arch_local_irq_save\n"
+		"	mrs	%0, " IRQMASK_REG_NAME_R "	@ native_save_irq\n"
 		"	cpsid	i"
 		: "=r" (flags) : : "memory", "cc");
 	return flags;
 }
 
-static inline void arch_local_irq_enable(void)
+static inline void native_irq_enable(void)
 {
 	asm volatile(
-		"	cpsie i			@ arch_local_irq_enable"
+		"	cpsie i			@ native_irq_enable"
 		:
 		:
 		: "memory", "cc");
 }
 
-static inline void arch_local_irq_disable(void)
+static inline void native_irq_disable(void)
 {
 	asm volatile(
-		"	cpsid i			@ arch_local_irq_disable"
+		"	cpsid i			@ native_irq_disable"
 		:
 		:
 		: "memory", "cc");
@@ -60,12 +56,12 @@ static inline void arch_local_irq_disable(void)
 /*
  * Save the current interrupt enable state & disable IRQs
  */
-static inline unsigned long arch_local_irq_save(void)
+static inline unsigned long native_irq_save(void)
 {
 	unsigned long flags, temp;
 
 	asm volatile(
-		"	mrs	%0, cpsr	@ arch_local_irq_save\n"
+		"	mrs	%0, cpsr	@ native_save_irq\n"
 		"	orr	%1, %0, #128\n"
 		"	msr	cpsr_c, %1"
 		: "=r" (flags), "=r" (temp)
@@ -77,11 +73,11 @@ static inline unsigned long arch_local_irq_save(void)
 /*
  * Enable IRQs
  */
-static inline void arch_local_irq_enable(void)
+static inline void native_irq_enable(void)
 {
 	unsigned long temp;
 	asm volatile(
-		"	mrs	%0, cpsr	@ arch_local_irq_enable\n"
+		"	mrs	%0, cpsr	@ native_irq_enable\n"
 		"	bic	%0, %0, #128\n"
 		"	msr	cpsr_c, %0"
 		: "=r" (temp)
@@ -92,11 +88,11 @@ static inline void arch_local_irq_enable(void)
 /*
  * Disable IRQs
  */
-static inline void arch_local_irq_disable(void)
+static inline void native_irq_disable(void)
 {
 	unsigned long temp;
 	asm volatile(
-		"	mrs	%0, cpsr	@ arch_local_irq_disable\n"
+		"	mrs	%0, cpsr	@ native_irq_disable\n"
 		"	orr	%0, %0, #128\n"
 		"	msr	cpsr_c, %0"
 		: "=r" (temp)
@@ -139,11 +135,11 @@ static inline void arch_local_irq_disable(void)
 /*
  * Save the current interrupt enable state.
  */
-static inline unsigned long arch_local_save_flags(void)
+static inline unsigned long native_save_flags(void)
 {
 	unsigned long flags;
 	asm volatile(
-		"	mrs	%0, " IRQMASK_REG_NAME_R "	@ local_save_flags"
+		"	mrs	%0, " IRQMASK_REG_NAME_R "	@ native_save_flags"
 		: "=r" (flags) : : "memory", "cc");
 	return flags;
 }
@@ -151,20 +147,68 @@ static inline unsigned long arch_local_save_flags(void)
 /*
  * restore saved IRQ & FIQ state
  */
-static inline void arch_local_irq_restore(unsigned long flags)
+static inline void native_irq_restore(unsigned long flags)
 {
 	asm volatile(
-		"	msr	" IRQMASK_REG_NAME_W ", %0	@ local_irq_restore"
+		"	msr	" IRQMASK_REG_NAME_W ", %0	@ native_irq_restore"
 		:
 		: "r" (flags)
 		: "memory", "cc");
 }
 
-static inline int arch_irqs_disabled_flags(unsigned long flags)
+static inline bool native_irqs_disabled_flags(unsigned long flags)
 {
-	return flags & IRQMASK_I_BIT;
+	return (flags & IRQMASK_I_BIT) != 0;
 }
 
-#endif /* ifndef IPIPE */
+static inline bool native_irqs_disabled(void)
+{
+	unsigned long flags = native_save_flags();
+	return native_irqs_disabled_flags(flags);
+}
+
+#include <asm/irq_pipeline.h>
+
+#ifndef CONFIG_IRQ_PIPELINE
+
+static inline unsigned long arch_local_irq_save(void)
+{
+	return native_irq_save();
+}
+
+static inline void arch_local_irq_enable(void)
+{
+	native_irq_enable();
+}
+
+static inline void arch_local_irq_disable(void)
+{
+	native_irq_disable();
+}
+
+static inline unsigned long arch_local_save_flags(void)
+{
+	return native_save_flags();
+}
+
+static inline void arch_local_irq_restore(unsigned long flags)
+{
+	native_irq_restore(flags);
+}
+
+static inline int arch_irqs_disabled_flags(unsigned long flags)
+{
+	return native_irqs_disabled_flags(flags);
+}
+
+#endif /* !CONFIG_IRQ_PIPELINE */
+
+static inline int arch_irqs_disabled(void)
+{
+	unsigned long flags = arch_local_save_flags();
+
+	return arch_irqs_disabled_flags(flags);
+}
+
 #endif /* ifdef __KERNEL__ */
 #endif /* ifndef __ASM_ARM_IRQFLAGS_H */

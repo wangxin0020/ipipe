@@ -33,7 +33,7 @@
 #include <asm/processor.h>
 #include <asm/page.h>
 #include <linux/stringify.h>
-#include <ipipe/thread_info.h>
+#include <dovetail/thread_info.h>
 
 /*
  * low level task data.
@@ -47,10 +47,7 @@ struct thread_info {
 
 	/* low level flags - has atomic operations done on it */
 	unsigned long	flags ____cacheline_aligned_in_smp;
-#ifdef CONFIG_IPIPE
-	unsigned long ipipe_flags;
-#endif
-	struct ipipe_threadinfo ipipe_data;
+	struct dovetail_thread_state dovetail_state;
 };
 
 /*
@@ -62,6 +59,7 @@ struct thread_info {
 	.cpu =		0,			\
 	.preempt_count = INIT_PREEMPT_COUNT,	\
 	.flags =	0,			\
+	.local_flags =	0,			\
 }
 
 #define init_thread_info	(init_thread_union.thread_info)
@@ -91,6 +89,7 @@ static inline struct thread_info *current_thread_info(void)
 					   TIF_NEED_RESCHED */
 #define TIF_32BIT		4	/* 32 bit binary */
 #define TIF_RESTORE_TM		5	/* need to restore TM FP/VEC/VSX */
+#define TIF_MAYDAY		6	/* emergency trap pending */
 #define TIF_SYSCALL_AUDIT	7	/* syscall auditing active */
 #define TIF_SINGLESTEP		8	/* singlestepping active */
 #define TIF_NOHZ		9	/* in adaptive nohz mode */
@@ -126,6 +125,7 @@ static inline struct thread_info *current_thread_info(void)
 #define _TIF_EMULATE_STACK_STORE	(1<<TIF_EMULATE_STACK_STORE)
 #define _TIF_NOHZ		(1<<TIF_NOHZ)
 #define _TIF_MMSWITCH_INT	(1<<TIF_MMSWITCH_INT)
+#define _TIF_MAYDAY		(1<<TIF_MAYDAY)
 #define _TIF_SYSCALL_DOTRACE	(_TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT | \
 				 _TIF_SECCOMP | _TIF_SYSCALL_TRACEPOINT | \
 				 _TIF_NOHZ)
@@ -135,15 +135,6 @@ static inline struct thread_info *current_thread_info(void)
 				 _TIF_RESTORE_TM)
 #define _TIF_PERSYSCALL_MASK	(_TIF_RESTOREALL|_TIF_NOERROR)
 
-/* ti->ipipe_flags */
-#define TIP_MAYDAY	0	/* MAYDAY call is pending */
-#define TIP_NOTIFY	1	/* Notify head domain about kernel events */
-#define TIP_HEAD	2	/* Runs in head domain */
-
-#define _TIP_MAYDAY	(1<<TIP_MAYDAY)
-#define _TIP_NOTIFY	(1<<TIP_NOTIFY)
-#define _TIP_HEAD	(1<<TIP_HEAD)
-
 /* Bits in local_flags */
 /* Don't move TLF_NAPPING without adjusting the code in entry_32.S */
 #define TLF_NAPPING		0	/* idle thread enabled NAP mode */
@@ -151,12 +142,16 @@ static inline struct thread_info *current_thread_info(void)
 #define TLF_RESTORE_SIGMASK	2	/* Restore signal mask in do_signal */
 #define TLF_LAZY_MMU		3	/* tlb_batch is active */
 #define TLF_RUNLATCH		4	/* Is the runlatch enabled? */
+#define TLF_DOVETAIL		5	/* notify head domain about kernel events */
+#define TLF_HEAD		6	/* runs in head domain */
 
 #define _TLF_NAPPING		(1 << TLF_NAPPING)
 #define _TLF_SLEEPING		(1 << TLF_SLEEPING)
 #define _TLF_RESTORE_SIGMASK	(1 << TLF_RESTORE_SIGMASK)
 #define _TLF_LAZY_MMU		(1 << TLF_LAZY_MMU)
 #define _TLF_RUNLATCH		(1 << TLF_RUNLATCH)
+#define _TLF_DOVETAIL		(1 << TLF_DOVETAIL)
+#define _TLF_HEAD		(1 << TLF_HEAD)
 
 #ifndef __ASSEMBLY__
 #define HAVE_SET_RESTORE_SIGMASK	1
@@ -174,6 +169,7 @@ static inline bool test_restore_sigmask(void)
 {
 	return current_thread_info()->local_flags & _TLF_RESTORE_SIGMASK;
 }
+
 static inline bool test_and_clear_restore_sigmask(void)
 {
 	struct thread_info *ti = current_thread_info();
@@ -181,12 +177,6 @@ static inline bool test_and_clear_restore_sigmask(void)
 		return false;
 	ti->local_flags &= ~_TLF_RESTORE_SIGMASK;
 	return true;
-}
-
-static inline bool test_thread_local_flags(unsigned int flags)
-{
-	struct thread_info *ti = current_thread_info();
-	return (ti->local_flags & flags) != 0;
 }
 
 #ifdef CONFIG_PPC64

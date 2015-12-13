@@ -56,12 +56,9 @@
 #endif
 	.endm
 
-#ifdef CONFIG_IPIPE
-#define PREEMPT_SCHEDULE_IRQ	__ipipe_preempt_schedule_irq
-#else /* !CONFIG_IPIPE */
+#ifndef CONFIG_IPIPE
 #define ret_from_exception	ret_to_user
-#define PREEMPT_SCHEDULE_IRQ	preempt_schedule_irq
-#endif /* CONFIG_IPIPE */
+#endif /* !CONFIG_IPIPE */
 
 #if defined(CONFIG_TRACE_IRQFLAGS) && !defined(CONFIG_IPIPE)
 #define TRACE_IRQSON  	bl  trace_hardirqs_on
@@ -350,13 +347,13 @@ el1_undef:
 	/*
 	 * Undefined instruction
 	 */
-#ifdef CONFIG_IPIPE
+#ifdef CONFIG_DOVETAIL
 	mov	x0, #7				//@ x0 = IPIPE_TRAP_UNDEFINSTR
 	mov	x1, sp				//@ x1 = &regs
-	bl	__ipipe_notify_trap		//@ branch to trap handler
+	bl	dovetail_handle_trap		//@ branch to trap handler
 	cmp	w0, #0
 	bne	ipipe_fast_svc_irq_exit
-#endif /* CONFIG_IPIPE */
+#endif /* CONFIG_DOVETAIL */
 	enable_dbg
 	mov	x0, sp
 	b	do_undefinstr
@@ -410,7 +407,7 @@ ENDPROC(el1_irq)
 #ifdef CONFIG_PREEMPT
 el1_preempt:
 	mov	x24, lr
-1:	bl	PREEMPT_SCHEDULE_IRQ
+1:	bl	preempt_schedule_irq
 	ldr	x0, [tsk, #TI_FLAGS]		// get new tasks TI_FLAGS
 	tbnz	x0, #TIF_NEED_RESCHED, 1b	// needs rescheduling?
 	ret	x24
@@ -555,13 +552,13 @@ el0_undef:
 	/*
 	 * Undefined instruction
 	 */
-#ifdef CONFIG_IPIPE
+#ifdef CONFIG_DOVETAIL
 	mov	x0, #7				// x0 = IPIPE_TRAP_UNDEFINSTR
 	mov	x1, sp				// x1 = &regs
-	bl	__ipipe_notify_trap		// branch to trap handler
+	bl	dovetail_handle_trap		// branch to trap handler
 	cmp	w0, #0
 	bne	ret_from_exception
-#endif /* CONFIG_IPIPE */
+#endif
 	// enable interrupts before calling the main handler
 	enable_dbg_and_irq
 	ct_user_exit
@@ -604,7 +601,7 @@ el0_irq_naked:
 	/* Fast IRQ exit, root domain stalled or not current. */
 	kernel_exit 0, ret = 0
 normal_irq_ret:
-#endif	/* CONFIG_IPIPE */
+#endif
 	TRACE_IRQSON
 	b	ret_to_user
 ENDPROC(el0_irq)
@@ -642,8 +639,8 @@ ENDPROC(cpu_switch_to)
 #ifdef CONFIG_IPIPE
 ret_from_exception:
 	disable_irq
-	ldr	x0, [tsk, #TI_IPIPE]
-	tst	x0, #_TIP_HEAD
+	ldr	x0, [tsk, #TI_LOCAL_FLAGS]
+	tst	x0, #_TLF_HEAD
 	b.eq	ret_to_user_noirq
 	kernel_exit 0, ret = 0
 #endif /* CONFIG_IPIPE */
@@ -717,28 +714,29 @@ el0_svc_naked:					// compat entry point
 	stp	x0, scno, [sp, #S_ORIG_X0]	// save the original x0 and syscall number
 	enable_dbg_and_irq
 
-#ifdef CONFIG_IPIPE
-	ldr	x16, [tsk, #TI_IPIPE]
+#ifdef CONFIG_DOVETAIL
+	ldr	x16, [tsk, #TI_LOCAL_FLAGS]
 	tst     scno, __ARM_ipipe_syscall
 	b.eq	fastcall_bypass
-	tst	x16, #_TIP_HEAD
+	tst	x16, #_TLF_HEAD
 	b.eq	fastcall_bypass
 	mov	x0, sp
-	bl	ipipe_fastcall_hook
+	bl	dovetail_fastcall_hook
 	cmp	w0, #0
 	b.lt	no_fastcall
-	ldr	x16, [tsk, #TI_IPIPE]
-	tst	x16, #_TIP_HEAD
+	ldr	x16, [tsk, #TI_LOCAL_FLAGS]
+	tst	x16, #_TLF_HEAD
 	b.ne	fastcall_exit
-	bl	__ipipe_root_sync
+	bl	dovetail_root_sync
 fastcall_tail:
 	ldr	x0, [sp, #S_X0]
 	b	ret_fast_syscall
 fastcall_exit:
-	tst	x16, #_TIP_MAYDAY
+	ldr	x16, [tsk, #TI_FLAGS]
+	tst	x16, #_TIF_MAYDAY
 	b.eq	fastcall_notail
 	mov	x0, sp
-	bl	__ipipe_call_mayday
+	bl	dovetail_call_mayday
 fastcall_notail:
 	ldr	x0, [sp, #S_X0]
 	disable_irq
@@ -746,17 +744,17 @@ fastcall_notail:
 	enable_step_tsk x1, x2
 	kernel_exit 0, ret = 1
 no_fastcall:
-	ldr	x16, [tsk, #TI_IPIPE]
+	ldr	x16, [tsk, #TI_LOCAL_FLAGS]
 fastcall_bypass:
-	tst	x16, #_TIP_NOTIFY
+	tst	x16, #_TLF_DOVETAIL
 	b.ne	syscall_pipeline
 	tst     scno, __ARM_ipipe_syscall
 	b.eq	regular_syscall
 syscall_pipeline:
 	mov	x0, sp
-	bl	__ipipe_notify_syscall
-	ldr	x16, [tsk, #TI_IPIPE]
-	tst	x16, #_TIP_HEAD
+	bl	dovetail_handle_syscall_slow
+	ldr	x16, [tsk, #TI_LOCAL_FLAGS]
+	tst	x16, #_TLF_HEAD
 	b.ne	fastcall_notail
 	cmp	w0, #0
 	b.ne	fastcall_tail
@@ -765,7 +763,7 @@ regular_syscall:
 	ldp	x2, x3, [sp, #S_X2]
 	ldp	x4, x5, [sp, #S_X4]
 	ldp	x6, x7, [sp, #S_X6]
-#endif /* CONFIG_IPIPE */
+#endif /* CONFIG_DOVETAIL */
 
 	ct_user_exit 1
 
@@ -828,12 +826,4 @@ ENTRY(sys_rt_sigreturn_wrapper)
 	b	sys_rt_sigreturn
 ENDPROC(sys_rt_sigreturn_wrapper)
 
-#ifdef CONFIG_IPIPE_TRACE_MCOUNT
-	.text
-	.align 3
-	.type mcount %function
-	.global mcount
-mcount:
-	ret		// just return
-ENDPROC(mcount)
 #endif

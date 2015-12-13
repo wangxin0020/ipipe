@@ -47,7 +47,9 @@ ret_fast_syscall:
 
 	restore_user_regs fast = 1, offset = S_OFF
 
-#ifdef CONFIG_IPIPE
+#ifdef CONFIG_IRQ_PIPELINE
+	
+#ifdef CONFIG_DOVETAIL
 
 .macro  ipipe_oabi_save_sysnr, tmp
 #ifdef CONFIG_OABI_COMPAT
@@ -74,13 +76,15 @@ ret_fast_syscall:
 #endif
 .endm
 	
+#endif /* CONFIG_DOVETAIL */
+
 __ipipe_ret_to_user:
 	disable_irq				@ disable interrupts
 ENTRY(__ipipe_ret_to_user_irqs_disabled)
 	slow_restore_user_regs
 ENDPROC(__ipipe_ret_to_user_irqs_disabled)
 
-#endif /* CONFIG_IPIPE */
+#endif /* CONFIG_IRQ_PIPELINE */
 
  UNWIND(.fnend		)
 
@@ -166,16 +170,6 @@ ENTRY(vector_swi)
 	str	r0, [sp, #S_OLD_R0]		@ Save OLD_R0
 #endif
 	zero_fp
-#ifdef CONFIG_IPIPE_TRACE_IRQSOFF
-	mov	r4, lr
-	mov	r0, #1		/* IPIPE_TRACE_BEGIN */
-	mov	r3, #0x90000000
-	sub	r2, lr, #4	/* calling PC */
-	mov	r1, pc
-	bl	ipipe_trace_asm
-	mov	lr, r4
-	ldm	sp, {r0 - r4}
-#endif /* CONFIG_IPIPE_TRACE_IRQSOFF */
 	alignment_trap r10, ip, __cr_alignment
 	enable_irq
 	ct_user_exit
@@ -234,54 +228,55 @@ ENTRY(vector_swi)
 #endif
 
 local_restart:
-#ifdef CONFIG_IPIPE
-	ldr	r10, [tsk, #TI_IPIPE]
+#ifdef CONFIG_DOVETAIL
+	ldr	r10, [tsk, #TI_LOCAL_FLAGS]
  	ldr	r0, =(__ARM_NR_ipipe - __NR_SYSCALL_BASE)
 	cmp	scno, r0
 	bne	slow_path
-	tst	r10, #_TIP_HEAD
+	tst	r10, #_TLF_HEAD
 	beq	slow_path
 	mov	r0, sp
 	ipipe_oabi_save_sysnr r10		@ caution: affects sp
-	bl	ipipe_fastcall_hook		@ __IPIPE_SYSCALL_E is assumed
+	bl	dovetail_fastcall_hook		@ _DOVETAIL_SYSCALL_E is assumed
 	ipipe_oabi_restore_sysnr r10
 	cmp	r0, #0
 	blt	no_fastcall
 	get_thread_info tsk
-	ldr	r10, [tsk, #TI_IPIPE]
-	tst	r10, #_TIP_HEAD
+	ldr	r10, [tsk, #TI_LOCAL_FLAGS]
+	tst	r10, #_TLF_HEAD
 	bne	fastcall_exit_check		@ check for MAYDAY
-	bl	__ipipe_root_sync
+	bl	dovetail_root_sync
 	b	ret_slow_syscall
 fastcall_exit_check:
-	tst	r10, #_TIP_MAYDAY
+	ldr	r10, [tsk, #TI_FLAGS]
+	tst	r10, #_TIF_MAYDAY
 	beq	__ipipe_ret_to_user
 	mov	r0, sp
-	bl	__ipipe_call_mayday
+	bl	dovetail_call_mayday
 	b	__ipipe_ret_to_user
 no_fastcall:
 	get_thread_info tsk
  	ldr	r0, =(__ARM_NR_ipipe - __NR_SYSCALL_BASE)
-	ldr	r10, [tsk, #TI_IPIPE]
+	ldr	r10, [tsk, #TI_LOCAL_FLAGS]
 slow_path:
-	tst	r10, #_TIP_NOTIFY
+	tst	r10, #_TLF_DOVETAIL
 	bne	pipeline_syscall
 	cmp	scno, r0
 	bne	root_syscall
 pipeline_syscall:
 	mov	r0, sp
 	ipipe_oabi_save_sysnr r10		@ caution: affects sp
-	bl	__ipipe_notify_syscall
+	bl	dovetail_handle_syscall_slow
 	ipipe_oabi_restore_sysnr r10
 	get_thread_info tsk
-	ldr	r10, [tsk, #TI_IPIPE]
-	tst	r10, #_TIP_HEAD
+	ldr	r10, [tsk, #TI_LOCAL_FLAGS]
+	tst	r10, #_TLF_HEAD
 	bne	__ipipe_ret_to_user
 	cmp	r0, #0
 	bgt	ret_slow_syscall
 root_syscall:
 	ldmia	sp, { r0 - r3 }
-#endif /* CONFIG_IPIPE */
+#endif /* CONFIG_DOVETAIL */
 
 	ldr	r10, [tsk, #TI_FLAGS]		@ check for syscall tracing
 	stmdb	sp!, {r4, r5}			@ push fifth and sixth args
@@ -478,28 +473,3 @@ ENTRY(sys_oabi_call_table)
 
 #endif
 
-
-#if defined(CONFIG_FRAME_POINTER) && (CONFIG_IPIPE_TRACE)
-
-	.text
-	.align 0
-	.type arm_return_addr %function
-	.global arm_return_addr
-
-arm_return_addr:
-	mov	ip, r0
-	mov	r0, fp
-3:
-	cmp	r0, #0
-	beq	1f		@ frame list hit end, bail
-	cmp	ip, #0
-	beq	2f		@ reached desired frame
-	ldr	r0, [r0, #-12]  @ else continue, get next fp
-	sub	ip, ip, #1
-	b	3b
-2:
-	ldr	r0, [r0, #-4]   @ get target return address
-1:
-	mov	pc, lr
-
-#endif

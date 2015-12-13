@@ -200,7 +200,7 @@ void __ipipe_spin_unlock_irqbegin(ipipe_spinlock_t *lock);
 
 void __ipipe_spin_unlock_irqcomplete(unsigned long x);
 
-#if defined(CONFIG_IPIPE_DEBUG_INTERNAL) && defined(CONFIG_SMP)
+#if defined(CONFIG_IRQ_PIPELINE_DEBUG) && defined(CONFIG_SMP)
 void __ipipe_spin_unlock_debug(unsigned long flags);
 #else
 #define __ipipe_spin_unlock_debug(flags)  do { } while (0)

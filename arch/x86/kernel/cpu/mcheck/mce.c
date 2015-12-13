@@ -1686,7 +1686,7 @@ void (*machine_check_vector)(struct pt_regs *, long error_code) =
 #ifdef CONFIG_IPIPE
 static int mce_trampoline(struct pt_regs *regs, long error_code)
 {
-	return IPIPE_DO_TRAP(machine_check_vector, X86_TRAP_MC, regs, error_code);
+	return handle_trap(machine_check_vector, X86_TRAP_MC, regs, error_code);
 }
 
 int (*__ipipe_machine_check_vector)(struct pt_regs *, long error_code) =

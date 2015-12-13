@@ -61,7 +61,7 @@ extern void irq_exit(void);
 
 #define nmi_enter()						\
 	do {							\
-		__ipipe_nmi_enter();				\
+		irq_pipeline_nmi_enter();			\
 		lockdep_off();					\
 		ftrace_nmi_enter();				\
 		BUG_ON(in_nmi());				\
@@ -78,7 +78,12 @@ extern void irq_exit(void);
 		preempt_count_sub(NMI_OFFSET + HARDIRQ_OFFSET);	\
 		ftrace_nmi_exit();				\
 		lockdep_on();					\
-		__ipipe_nmi_exit();				\
+		irq_pipeline_nmi_exit();			\
 	} while (0)
+
+static inline bool on_pipeline_entry(void)
+{
+	return irqs_pipelined() && in_pipeline();
+}
 
 #endif /* LINUX_HARDIRQ_H */

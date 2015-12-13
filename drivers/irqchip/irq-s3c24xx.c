@@ -26,7 +26,6 @@
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
 #include <linux/device.h>
-#include <linux/ipipe.h>
 #include <linux/irqdomain.h>
 #include <linux/irqchip/chained_irq.h>
 #include <linux/of.h>
@@ -331,7 +330,7 @@ static void s3c_irq_demux(unsigned int irq, struct irq_desc *desc)
 		n = __ffs(src);
 		src &= ~(1 << n);
 		irq = irq_find_mapping(sub_intc->domain, offset + n);
-		ipipe_handle_demuxed_irq(irq);
+		generic_handle_irq(irq);
 	}
 
 	chained_irq_exit(chip, desc);

@@ -32,7 +32,6 @@
 #include <linux/list.h>
 #include <linux/hash.h>
 #include <linux/rcupdate.h>
-#include <linux/ipipe.h>
 
 #include <trace/events/sched.h>
 
@@ -2519,9 +2518,6 @@ void __weak arch_ftrace_update_code(int command)
 
 static void ftrace_run_update_code(int command)
 {
-#ifdef CONFIG_IPIPE
-	unsigned long flags;
-#endif /* CONFIG_IPIPE */
 	int ret;
 
 	ret = ftrace_arch_code_modify_prepare();
@@ -2535,13 +2531,12 @@ static void ftrace_run_update_code(int command)
 	 * is safe. The stop_machine() is the safest, but also
 	 * produces the most overhead.
 	 */
-#ifdef CONFIG_IPIPE
-	flags = ipipe_critical_enter(NULL);
-	__ftrace_modify_code(&command);
-	ipipe_critical_exit(flags);
-#else  /* !CONFIG_IPIPE */
-	arch_ftrace_update_code(command);
-#endif /* !CONFIG_IPIPE */
+	if (irqs_pipelined()) {
+		unsigned long flags = irq_pipeline_lock(NULL, NULL);
+		__ftrace_modify_code(&command);
+		irq_pipeline_unlock(flags);
+	} else
+		arch_ftrace_update_code(command);
 
 	ret = ftrace_arch_code_modify_post_process();
 	FTRACE_WARN_ON(ret);
@@ -5187,7 +5182,7 @@ __ftrace_ops_list_func(unsigned long ip, unsigned long parent_ip,
 	} while_for_each_ftrace_op(op);
 out:
 #ifdef CONFIG_IPIPE
-	if (hard_irqs_disabled() || !__ipipe_root_p)
+	if (hard_irqs_disabled() || !__on_root_stage())
 		/*
 		 * Nothing urgent to schedule here. At latest the timer tick
 		 * will pick up whatever the tracing functions kicked off.

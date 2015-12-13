@@ -176,7 +176,7 @@ static unsigned int steal_all_contexts(void)
 static unsigned int steal_context_up(unsigned int id)
 {
 	struct mm_struct *mm;
-	int cpu = ipipe_processor_id();
+	int cpu = raw_smp_processor_id();
 
 	/* Pick up the victim mm */
 	mm = context_mm[id];
@@ -228,7 +228,7 @@ static void context_check_map(void) { }
 
 void switch_mmu_context(struct mm_struct *prev, struct mm_struct *next)
 {
-	unsigned int i, id, cpu = ipipe_processor_id();
+	unsigned int i, id, cpu = raw_smp_processor_id();
 	unsigned long *map;
 
 	/* No lockless fast path .. yet */

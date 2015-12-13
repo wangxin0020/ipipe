@@ -77,6 +77,12 @@ extern asmlinkage void threshold_interrupt(void);
 extern asmlinkage void call_function_interrupt(void);
 extern asmlinkage void call_function_single_interrupt(void);
 
+#ifdef CONFIG_IPIPE
+void ipipe_hrtimer_interrupt(void);
+void ipipe_reschedule_interrupt(void);
+void ipipe_critical_interrupt(void);
+#endif
+
 #ifdef CONFIG_TRACING
 /* Interrupt handlers registered during init_IRQ */
 extern void trace_apic_timer_interrupt(void);

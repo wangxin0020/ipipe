@@ -27,14 +27,18 @@
 #define __pgd_free(pgd)	free_pages((unsigned long)pgd, 2)
 #endif
 
-#ifdef CONFIG_IPIPE_WANT_PTE_PINNING
-
+#ifdef CONFIG_FORCE_COMMIT_MEMORY
 /*
  * Provide support for pinning the PTEs referencing kernel mappings in
  * the current memory context, so that we don't get minor faults when
  * treading over kernel memory.  For this we need to maintain a map of
  * active PGDs.
+ *
+ * We disable this feature for v6 and above, for which minor fault can
+ * be handling is cheap.
  */
+
+#if  __LINUX_ARM_ARCH__ < 6
 
 #include <linux/rbtree.h>
 #include <linux/list.h>
@@ -157,7 +161,7 @@ static void pin_k_mapping(pgd_t *pgd, unsigned long addr)
 		copy_pmd(pmd, pmd_k);
 }
 
-void __ipipe_pin_mapping_globally(unsigned long start, unsigned long end)
+void arch_pin_mapping_globally(unsigned long start, unsigned long end)
 {
 	unsigned long next, addr;
 	struct pgd_holder *h;
@@ -176,7 +180,7 @@ void __ipipe_pin_mapping_globally(unsigned long start, unsigned long end)
 	pgd_table_unlock(flags);
 }
 
-#else  /* !CONFIG_IPIPE_WANT_PTE_PINNING */
+#else  /* __LINUX_ARM_ARCH__ >= 6 */
 
 #define pgd_table_lock(__flags)		do { (void)(__flags); } while (0)
 #define pgd_table_unlock(__flags)	do { (void)(__flags); } while (0)
@@ -192,7 +196,12 @@ static inline int pgd_holder_insert(struct pgd_holder *h) { return 1; }
 
 static inline void pgd_holder_free(pgd_t *pgd) { }
 
-#endif  /* !CONFIG_IPIPE_WANT_PTE_PINNING */
+void arch_pin_mapping_globally(unsigned long start, unsigned long end)
+{ }
+
+#endif  /* __LINUX_ARM_ARCH__ >= 6 */
+
+#endif /* CONFIG_FORCE_COMMIT_MEMORY */
 
 /*
  * need to get a 16k page for level 1

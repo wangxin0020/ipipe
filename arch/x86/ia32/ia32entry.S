@@ -72,9 +72,9 @@
 	CFI_UNDEFINED	r15
 	.endm
 
-	.macro IPIPE_IA32_SYSCALL nr fast_exit post_exit
-#ifdef CONFIG_IPIPE
-	testl $_TIP_NOTIFY, ASM_THREAD_INFO(TI_ipipe, %rsp, SIZEOF_PTREGS)
+	.macro DOVETAIL_IA32_SYSCALL nr fast_exit post_exit
+#ifdef CONFIG_DOVETAIL
+	testl $_TLF_DOVETAIL, ASM_THREAD_INFO(TI_status, %rsp, SIZEOF_PTREGS)
 	jnz	1f
 	cmpq	$(IA32_NR_syscalls),\nr
 	jb	2f
@@ -88,12 +88,12 @@
 	ALLOC_PT_GPREGS_ON_STACK
 	SAVE_C_REGS
 	leaq	(%rsp), %rdi /* r15->bx not saved */
-	call __ipipe_notify_syscall
+	call	dovetail_handle_syscall_slow
 	movq	%rax, %rdi
 	movq	RAX(%rsp), %rax
 	REMOVE_PT_GPREGS_FROM_STACK 8
 	movq	%rax, RAX(%rsp)
-	testl	$_TIP_HEAD, ASM_THREAD_INFO(TI_ipipe, %rsp, SIZEOF_PTREGS)
+	testl	$_TLF_HEAD, ASM_THREAD_INFO(TI_status, %rsp, SIZEOF_PTREGS)
 	jnz	\fast_exit
 	test	%rdi, %rdi
 	jnz	\post_exit
@@ -204,7 +204,7 @@ ENTRY(ia32_sysenter_target)
 sysenter_flags_fixed:
 
 	orl     $TS_COMPAT, ASM_THREAD_INFO(TI_status, %rsp, SIZEOF_PTREGS)
-	IPIPE_IA32_SYSCALL %rax sysexit_from_sys_call sysexit_work
+	DOVETAIL_IA32_SYSCALL %rax sysexit_from_sys_call sysexit_work
 	testl   $_TIF_WORK_SYSCALL_ENTRY, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	CFI_REMEMBER_STATE
 	jnz  sysenter_tracesys
@@ -429,7 +429,7 @@ ENTRY(ia32_cstar_target)
 	_ASM_EXTABLE(1b,ia32_badarg)
 	ASM_CLAC
 	orl     $TS_COMPAT, ASM_THREAD_INFO(TI_status, %rsp, SIZEOF_PTREGS)
-	IPIPE_IA32_SYSCALL %rax sysretl_from_sys_call cstar_work
+	DOVETAIL_IA32_SYSCALL %rax sysretl_from_sys_call cstar_work
 	testl   $_TIF_WORK_SYSCALL_ENTRY, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	CFI_REMEMBER_STATE
 	jnz   cstar_tracesys
@@ -571,7 +571,7 @@ ENTRY(ia32_syscall)
 	CFI_ADJUST_CFA_OFFSET 10*8
 
 	orl $TS_COMPAT, ASM_THREAD_INFO(TI_status, %rsp, SIZEOF_PTREGS)
-	IPIPE_IA32_SYSCALL %rax fast_exit_syscall ia32_ret_from_sys_call
+	DOVETAIL_IA32_SYSCALL %rax fast_exit_syscall ia32_ret_from_sys_call
 	testl $_TIF_WORK_SYSCALL_ENTRY, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	jnz ia32_tracesys
 	cmpq $(IA32_NR_syscalls-1),%rax

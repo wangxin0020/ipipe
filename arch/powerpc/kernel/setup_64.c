@@ -456,7 +456,7 @@ void __init setup_system(void)
 	 * Early init before per-cpu areas are moved to their final
 	 * location.
 	 */
-	local_paca->ipipe_statp = (u64)&ipipe_percpu_context(&ipipe_root, 0)->status;
+	local_paca->ipipe_statp = (u64)&irq_stage_context(&root_irq_stage, 0)->status;
 #endif
 	DBG(" -> setup_system()\n");
 
@@ -781,8 +781,8 @@ void __init setup_per_cpu_areas(void)
 		paca[cpu].data_offset = __per_cpu_offset[cpu];
 	}
 #ifdef CONFIG_IPIPE
-	/* Reset pointer to the relocated per-cpu root domain data. */
-	local_paca->ipipe_statp = (u64)&ipipe_percpu_context(&ipipe_root, 0)->status;
+	/* Reset pointer to the relocated per-cpu root stage data. */
+	local_paca->ipipe_statp = (u64)&irq_stage_context(&root_irq_stage, 0)->status;
 #endif
 }
 #endif
