@@ -209,6 +209,9 @@ static int __kprobes __die(const char *str, struct pt_regs *regs, long err)
 #ifdef CONFIG_NUMA
 	printk("NUMA ");
 #endif
+#ifdef CONFIG_IRQ_PIPELINE
+	printk("IRQ_PIPELINE ");
+#endif
 	printk("%s\n", ppc_md.name ? ppc_md.name : "");
 
 	if (notify_die(DIE_OOPS, str, regs, err, 255, SIGSEGV) == NOTIFY_STOP)
