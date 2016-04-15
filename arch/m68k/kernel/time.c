@@ -41,7 +41,7 @@ EXPORT_SYMBOL_GPL(mach_random_get_entropy);
 static irqreturn_t timer_interrupt(int irq, void *dummy)
 {
 	xtime_update(1);
-	update_process_times(user_mode(get_irq_regs()));
+	update_process_times(get_irq_regs());
 	profile_tick(CPU_PROFILING);
 
 #ifdef CONFIG_HEARTBEAT
