@@ -131,7 +131,10 @@ void arch_save_timer_regs(struct pt_regs *dst,
 		dst->msr &= ~MSR_EE;
 }
 
-#define __ipipe_root_tick_p(regs)	((regs)->msr & MSR_EE)
+static inline bool arch_is_root_tick(struct pt_regs *regs)
+{
+	return ((regs)->msr & MSR_EE) != 0;
+}
 
 #ifdef CONFIG_PPC64
 #define ipipe_read_tsc(t)	(t = mftb())

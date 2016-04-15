@@ -88,7 +88,7 @@ static void tick_periodic(int cpu)
 		update_wall_time();
 	}
 
-	update_root_process_times(get_irq_regs());
+	update_process_times(get_irq_regs());
 	profile_tick(CPU_PROFILING);
 }
 

@@ -127,7 +127,10 @@ static inline void irq_pipeline_init_late(void) { }
 
 static inline void irq_pipeline_enter_nosync(unsigned int irq) { }
 
-#define __ipipe_root_tick_p(regs)	1
+static inline bool arch_is_root_tick(struct pt_regs *regs)
+{
+	return true;
+}
 
 static inline void irq_pipeline_clear(unsigned int irq) { }
 

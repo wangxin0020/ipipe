@@ -85,7 +85,10 @@ DECLARE_PER_CPU(int, __ipipe_defer_root_sync);
 #define bfin_read_TIMER_STATUS(val)	bfin_read_TIMER_STATUS0(val)
 #endif
 
-#define __ipipe_root_tick_p(regs)	((regs->ipend & 0x10) != 0)
+static inline bool arch_is_root_tick(struct pt_regs *regs)
+{
+	return (regs->ipend & 0x10) != 0;
+}
 
 #endif /* CONFIG_IPIPE */
 

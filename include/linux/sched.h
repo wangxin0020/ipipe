@@ -368,17 +368,8 @@ extern void show_stack(struct task_struct *task, unsigned long *sp);
 
 extern void cpu_init (void);
 extern void trap_init(void);
-extern void update_process_times(int user);
+extern void update_process_times(struct pt_regs *regs);
 extern void scheduler_tick(void);
-
-#ifdef CONFIG_IPIPE
-void update_root_process_times(struct pt_regs *regs);
-#else  /* !CONFIG_IPIPE */
-static inline void update_root_process_times(struct pt_regs *regs)
-{
-	update_process_times(user_mode(regs));
-}
-#endif /* CONFIG_IPIPE */
 
 extern void sched_show_task(struct task_struct *p);
 

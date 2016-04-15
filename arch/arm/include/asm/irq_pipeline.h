@@ -132,7 +132,10 @@ void arch_save_timer_regs(struct pt_regs *dst,
 		dst->ARM_cpsr |= PSR_I_BIT;
 }
 
-#define __ipipe_root_tick_p(regs) (!arch_irqs_disabled_flags(regs->ARM_cpsr))
+static inline bool arch_is_root_tick(struct pt_regs *regs)
+{
+	return !arch_irqs_disabled_flags(regs->ARM_cpsr);
+}
 
 struct timekeeper;
 void __ipipe_update_vsyscall(struct timekeeper *tk);

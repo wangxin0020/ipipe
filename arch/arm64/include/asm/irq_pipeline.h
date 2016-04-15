@@ -72,7 +72,10 @@ static inline void __ipipe_mach_update_tsc(void) {}
 unsigned long long __ipipe_tsc_get(void);
 void __ipipe_tsc_register(struct __ipipe_tscinfo *info);
 
-#define __ipipe_root_tick_p(regs) (!arch_irqs_disabled_flags(regs->pstate))
+static inline bool arch_is_root_tick(struct pt_regs *regs)
+{
+	return !arch_irqs_disabled_flags(regs->pstate);
+}
 
 struct task_struct *ipipe_switch_to(struct task_struct *prev,
 				    struct task_struct *next);

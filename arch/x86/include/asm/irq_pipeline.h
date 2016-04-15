@@ -119,7 +119,10 @@ void arch_save_timer_regs(struct pt_regs *dst,
 		dst->flags &= ~X86_EFLAGS_IF;
 }
 
-#define __ipipe_root_tick_p(regs)	((regs)->flags & X86_EFLAGS_IF)
+static inline bool arch_is_root_tick(struct pt_regs *regs)
+{
+	return ((regs)->flags & X86_EFLAGS_IF) != 0;
+}
 
 #ifdef CONFIG_X86_32
 
