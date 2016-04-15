@@ -654,7 +654,6 @@ void smp_ipi_timer_interrupt(struct pt_regs *regs)
  *==========================================================================*/
 void smp_local_timer_interrupt(void)
 {
-	int user = user_mode(get_irq_regs());
 	int cpu_id = smp_processor_id();
 
 	/*
@@ -684,7 +683,7 @@ void smp_local_timer_interrupt(void)
 				= per_cpu(prof_counter, cpu_id);
 		}
 
-		update_process_times(user);
+		update_process_times(get_irq_regs());
 	}
 }
 

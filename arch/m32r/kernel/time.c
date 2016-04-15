@@ -117,7 +117,7 @@ static irqreturn_t timer_interrupt(int irq, void *dev_id)
 	xtime_update(1);
 
 #ifndef CONFIG_SMP
-	update_process_times(user_mode(get_irq_regs()));
+	update_process_times(get_irq_regs());
 #endif
 	/* As we return to user mode fire off the other CPU schedulers..
 	   this is basically because we don't yet share IRQ's around.
