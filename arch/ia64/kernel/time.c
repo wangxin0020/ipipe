@@ -168,7 +168,7 @@ timer_interrupt (int irq, void *dev_id)
 		goto skip_process_time_accounting;
 
 	while (1) {
-		update_process_times(user_mode(get_irq_regs()));
+		update_process_times(get_irq_regs());
 
 		new_itm += local_cpu_data->itm_delta;
 
