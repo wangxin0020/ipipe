@@ -89,7 +89,7 @@ static void __init mn10300_sched_clock_init(void)
 irqreturn_t local_timer_interrupt(void)
 {
 	profile_tick(CPU_PROFILING);
-	update_process_times(user_mode(get_irq_regs()));
+	update_process_times(get_irq_regs());
 	return IRQ_HANDLED;
 }
 
