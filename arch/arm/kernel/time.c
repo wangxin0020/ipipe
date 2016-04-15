@@ -71,7 +71,7 @@ void timer_tick(void)
 	profile_tick(CPU_PROFILING);
 	xtime_update(1);
 #ifndef CONFIG_SMP
-	update_process_times(user_mode(get_irq_regs()));
+	update_process_times(get_irq_regs());
 #endif
 }
 #endif
