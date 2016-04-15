@@ -160,7 +160,7 @@ static inline irqreturn_t timer_interrupt(int irq, void *dev_id)
 	reset_watchdog();
 
 	/* Update statistics. */
-	update_process_times(user_mode(regs));
+	update_process_times(regs);
 
 	/* call the real timer interrupt handler */
 	xtime_update(1);
