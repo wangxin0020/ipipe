@@ -160,7 +160,7 @@ irqreturn_t __irq_entry timer_interrupt(int irq, void *dev_id)
 
 	if (!--cpuinfo->prof_counter) {
 		cpuinfo->prof_counter = cpuinfo->prof_multiplier;
-		update_process_times(user_mode(get_irq_regs()));
+		update_process_times(get_irq_regs());
 	}
 
 	if (cpu == 0)
