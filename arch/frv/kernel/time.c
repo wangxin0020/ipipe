@@ -63,7 +63,7 @@ static irqreturn_t timer_interrupt(int irq, void *dummy)
 	__set_LEDS(n);
 #endif /* CONFIG_HEARTBEAT */
 
-	update_process_times(user_mode(get_irq_regs()));
+	update_process_times(get_irq_regs());
 
 	return IRQ_HANDLED;
 }
