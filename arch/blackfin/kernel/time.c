@@ -123,11 +123,7 @@ irqreturn_t timer_interrupt(int irq, void *dummy)
 {
 	xtime_update(1);
 
-#ifdef CONFIG_IPIPE
-	update_root_process_times(get_irq_regs());
-#else
-	update_process_times(user_mode(get_irq_regs()));
-#endif
+	update_process_times(get_irq_regs());
 	profile_tick(CPU_PROFILING);
 
 	return IRQ_HANDLED;
