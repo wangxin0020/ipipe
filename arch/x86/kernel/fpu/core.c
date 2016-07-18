@@ -108,9 +108,11 @@ EXPORT_SYMBOL(irq_fpu_usable);
 void __kernel_fpu_begin(void)
 {
 	struct fpu *fpu = &current->thread.fpu;
+	unsigned long flags;
 
 	WARN_ON_FPU(!irq_fpu_usable());
 
+	flags = hard_cond_local_irq_save();
 	kernel_fpu_disable();
 
 	if (fpu->fpregs_active) {
@@ -119,19 +121,23 @@ void __kernel_fpu_begin(void)
 		this_cpu_write(fpu_fpregs_owner_ctx, NULL);
 		__fpregs_activate_hw();
 	}
+	hard_cond_local_irq_restore(flags);
 }
 EXPORT_SYMBOL(__kernel_fpu_begin);
 
 void __kernel_fpu_end(void)
 {
 	struct fpu *fpu = &current->thread.fpu;
+	unsigned long flags;
 
+	flags = hard_cond_local_irq_save();
 	if (fpu->fpregs_active)
 		copy_kernel_to_fpregs(&fpu->state);
 	else
 		__fpregs_deactivate_hw();
 
 	kernel_fpu_enable();
+	hard_cond_local_irq_restore(flags);
 }
 EXPORT_SYMBOL(__kernel_fpu_end);
 
@@ -185,14 +191,16 @@ EXPORT_SYMBOL_GPL(irq_ts_restore);
  */
 void fpu__save(struct fpu *fpu)
 {
+	unsigned long flags;
+	
 	WARN_ON_FPU(fpu != &current->thread.fpu);
 
-	preempt_disable();
+	flags = hard_preempt_disable();
 	if (fpu->fpregs_active) {
 		if (!copy_fpregs_to_fpstate(fpu))
 			fpregs_deactivate(fpu);
 	}
-	preempt_enable();
+	hard_preempt_enable(flags);
 }
 EXPORT_SYMBOL_GPL(fpu__save);
 
@@ -231,6 +239,8 @@ EXPORT_SYMBOL_GPL(fpstate_init);
  */
 static void fpu_copy(struct fpu *dst_fpu, struct fpu *src_fpu)
 {
+	unsigned long flags;
+
 	WARN_ON_FPU(src_fpu != &current->thread.fpu);
 
 	/*
@@ -256,12 +266,12 @@ static void fpu_copy(struct fpu *dst_fpu, struct fpu *src_fpu)
 	 * It shouldn't be an issue as even FNSAVE is plenty
 	 * fast in terms of critical section length.
 	 */
-	preempt_disable();
+	flags = hard_preempt_disable();
 	if (!copy_fpregs_to_fpstate(dst_fpu)) {
 		memcpy(&src_fpu->state, &dst_fpu->state, xstate_size);
 		fpregs_deactivate(src_fpu);
 	}
-	preempt_enable();
+	hard_preempt_enable(flags);
 }
 
 int fpu__copy(struct fpu *dst_fpu, struct fpu *src_fpu)
@@ -270,7 +280,8 @@ int fpu__copy(struct fpu *dst_fpu, struct fpu *src_fpu)
 	dst_fpu->fpregs_active = 0;
 	dst_fpu->last_cpu = -1;
 
-	if (src_fpu->fpstate_active && cpu_has_fpu)
+	if (IS_ENABLED(CONFIG_IPIPE) ||
+	    (src_fpu->fpstate_active && cpu_has_fpu))
 		fpu_copy(dst_fpu, src_fpu);
 
 	return 0;
@@ -363,6 +374,9 @@ void fpu__activate_fpstate_write(struct fpu *fpu)
  */
 void fpu__restore(struct fpu *fpu)
 {
+	unsigned long flags;
+
+	flags = hard_local_irq_save();
 	fpu__activate_curr(fpu);
 
 	/* Avoid __kernel_fpu_begin() right after fpregs_activate() */
@@ -371,6 +385,7 @@ void fpu__restore(struct fpu *fpu)
 	copy_kernel_to_fpregs(&fpu->state);
 	fpu->counter++;
 	kernel_fpu_enable();
+	hard_local_irq_restore(flags);
 }
 EXPORT_SYMBOL_GPL(fpu__restore);
 
@@ -383,22 +398,35 @@ EXPORT_SYMBOL_GPL(fpu__restore);
  * a state-restore is coming: either an explicit one,
  * or a reschedule.
  */
+
+#ifdef CONFIG_IPIPE
+#define FWAIT_PROLOGUE "sti\n"
+#define FWAIT_EPILOGUE "cli\n"
+#else
+#define FWAIT_PROLOGUE
+#define FWAIT_EPILOGUE
+#endif
+
 void fpu__drop(struct fpu *fpu)
 {
-	preempt_disable();
+	unsigned long flags;
+	
+	flags = hard_preempt_disable();
 	fpu->counter = 0;
 
 	if (fpu->fpregs_active) {
 		/* Ignore delayed exceptions from user space */
-		asm volatile("1: fwait\n"
+		asm volatile(FWAIT_PROLOGUE
+			     "1: fwait\n"
 			     "2:\n"
+			     FWAIT_EPILOGUE
 			     _ASM_EXTABLE(1b, 2b));
 		fpregs_deactivate(fpu);
 	}
 
 	fpu->fpstate_active = 0;
 
-	preempt_enable();
+	hard_preempt_enable(flags);
 }
 
 /*
@@ -421,17 +449,21 @@ static inline void copy_init_fpstate_to_fpregs(void)
  */
 void fpu__clear(struct fpu *fpu)
 {
+	unsigned long flags;
+	
 	WARN_ON_FPU(fpu != &current->thread.fpu); /* Almost certainly an anomaly */
 
 	if (!use_eager_fpu()) {
 		/* FPU state will be reallocated lazily at the first use. */
 		fpu__drop(fpu);
 	} else {
+		flags = hard_local_irq_save();
 		if (!fpu->fpstate_active) {
 			fpu__activate_curr(fpu);
 			user_fpu_begin();
 		}
 		copy_init_fpstate_to_fpregs();
+		hard_local_irq_restore(flags);
 	}
 }
 

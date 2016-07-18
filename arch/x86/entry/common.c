@@ -16,6 +16,7 @@
 #include <linux/tracehook.h>
 #include <linux/audit.h>
 #include <linux/seccomp.h>
+#include <linux/unistd.h>
 #include <linux/signal.h>
 #include <linux/export.h>
 #include <linux/context_tracking.h>
@@ -214,11 +215,21 @@ static struct thread_info *pt_regs_to_thread_info(struct pt_regs *regs)
 	return (struct thread_info *)(top_of_stack - THREAD_SIZE);
 }
 
+#ifdef CONFIG_IPIPE
+#define disable_local_irqs()	hard_local_irq_disable()
+#define enable_local_irqs()	hard_local_irq_enable()
+#define check_irqs_disabled()	hard_irqs_disabled()
+#else
+#define disable_local_irqs()	local_irq_disable()
+#define enable_local_irqs()	local_irq_enable()
+#define check_irqs_disabled()	irqs_disabled()
+#endif
+
 /* Called with IRQs disabled. */
 __visible void prepare_exit_to_usermode(struct pt_regs *regs)
 {
-	if (WARN_ON(!irqs_disabled()))
-		local_irq_disable();
+	if (WARN_ON(!check_irqs_disabled()))
+		disable_local_irqs();
 
 	/*
 	 * In order to return to user mode, we need to have IRQs off with
@@ -238,7 +249,7 @@ __visible void prepare_exit_to_usermode(struct pt_regs *regs)
 			break;
 
 		/* We have work to do. */
-		local_irq_enable();
+		enable_local_irqs();
 
 		if (cached_flags & _TIF_NEED_RESCHED)
 			schedule();
@@ -259,7 +270,7 @@ __visible void prepare_exit_to_usermode(struct pt_regs *regs)
 			fire_user_return_notifiers();
 
 		/* Disable IRQs and retry */
-		local_irq_disable();
+		disable_local_irqs();
 	}
 
 	user_enter();
@@ -277,16 +288,18 @@ __visible void syscall_return_slowpath(struct pt_regs *regs)
 
 	CT_WARN_ON(ct_state() != CONTEXT_KERNEL);
 
-	if (WARN(irqs_disabled(), "syscall %ld left IRQs disabled",
+	if (WARN(check_irqs_disabled(), "syscall %ld left IRQs disabled",
 		 regs->orig_ax))
-		local_irq_enable();
+		enable_local_irqs();
 
 	/*
 	 * First do one-time work.  If these work items are enabled, we
 	 * want to run them exactly once per syscall exit with IRQs on.
 	 */
-	if (cached_flags & (_TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT |
-			    _TIF_SINGLESTEP | _TIF_SYSCALL_TRACEPOINT)) {
+	if ((cached_flags & (_TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT |
+			     _TIF_SINGLESTEP | _TIF_SYSCALL_TRACEPOINT)) &&
+	    (!IS_ENABLED(CONFIG_IPIPE) ||
+	     syscall_get_nr(current, regs) < NR_syscalls)) {
 		audit_syscall_exit(regs);
 
 		if (cached_flags & _TIF_SYSCALL_TRACEPOINT)
@@ -313,6 +326,6 @@ __visible void syscall_return_slowpath(struct pt_regs *regs)
 	ti->status &= ~TS_COMPAT;
 #endif
 
-	local_irq_disable();
+	disable_local_irqs();
 	prepare_exit_to_usermode(regs);
 }

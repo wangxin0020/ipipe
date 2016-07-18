@@ -32,6 +32,7 @@
 #include <linux/err.h>
 #include <asm/thread_info.h>
 #include <asm/irqflags.h>
+#include <asm/ipipe_base.h>
 #include <asm/errno.h>
 #include <asm/segment.h>
 #include <asm/smp.h>
@@ -59,6 +60,12 @@
  * Allowing a register to be clobbered can shrink the paravirt replacement
  * enough to patch inline, increasing performance.
  */
+
+#ifdef CONFIG_IPIPE
+#define PREEMPT_SCHEDULE_IRQ	call __ipipe_preempt_schedule_irq
+#else /* !CONFIG_IPIPE */
+#define PREEMPT_SCHEDULE_IRQ	call preempt_schedule_irq
+#endif /* CONFIG_IPIPE */
 
 #ifdef CONFIG_PREEMPT
 # define preempt_stop(clobbers)	DISABLE_INTERRUPTS(clobbers); TRACE_IRQS_OFF
@@ -205,6 +212,7 @@
 .endm
 
 ENTRY(ret_from_fork)
+	HARD_COND_ENABLE_INTERRUPTS
 	pushl	%eax
 	call	schedule_tail
 	GET_THREAD_INFO(%ebp)
@@ -238,7 +246,7 @@ ENDPROC(ret_from_kernel_thread)
 	ALIGN
 ret_from_exception:
 	preempt_stop(CLBR_ANY)
-ret_from_intr:
+ENTRY(ret_from_intr)
 	GET_THREAD_INFO(%ebp)
 #ifdef CONFIG_VM86
 	movl	PT_EFLAGS(%esp), %eax		# mix EFLAGS and CS
@@ -271,7 +279,7 @@ need_resched:
 	jnz	restore_all
 	testl	$X86_EFLAGS_IF, PT_EFLAGS(%esp)	# interrupts off (exception path) ?
 	jz	restore_all
-	call	preempt_schedule_irq
+	PREEMPT_SCHEDULE_IRQ
 	jmp	need_resched
 END(resume_kernel)
 #endif
@@ -324,6 +332,37 @@ sysenter_past_esp:
 
 	GET_THREAD_INFO(%ebp)
 
+#ifdef CONFIG_IPIPE
+#ifndef CONFIG_IPIPE_LEGACY
+	cmpl $(NR_syscalls),%eax
+	jb slow_path
+	testl $_TIP_HEAD,TI_ipipe(%ebp) /* implies that TIP_NOTIFY if set */
+	jz slow_path
+	movl  %esp,%eax
+	call ipipe_fastcall_hook /* __IPIPE_SYSCALL_E is assumed */
+	testl  %eax,%eax
+	movl PT_EAX(%esp),%eax
+	jge sysenter_exit_sync
+	/* fastcall handler not implemented */
+	movl PT_ORIG_EAX(%esp),%eax
+slow_path:
+#endif /* !CONFIG_IPIPE_LEGACY */
+	testl $_TIP_NOTIFY,TI_ipipe(%ebp)
+	jnz pipeline_sysenter
+	cmpl $(NR_syscalls),%eax
+	jb root_sysenter
+pipeline_sysenter:
+	movl  %esp,%eax
+	call __ipipe_notify_syscall
+	mov %eax,%ecx
+	movl PT_EAX(%esp),%eax
+	testl $_TIP_HEAD,TI_ipipe(%ebp)
+	jnz sysenter_exit_fast
+	testl %ecx,%ecx
+	jne sysenter_exit_check
+	movl PT_ORIG_EAX(%esp),%eax
+root_sysenter:
+#endif /* CONFIG_IPIPE */
 	testl	$_TIF_WORK_SYSCALL_ENTRY, TI_flags(%ebp)
 	jnz	syscall_trace_entry
 sysenter_do_call:
@@ -332,6 +371,7 @@ sysenter_do_call:
 	call	*sys_call_table(, %eax, 4)
 sysenter_after_call:
 	movl	%eax, PT_EAX(%esp)
+sysenter_exit_check:
 	LOCKDEP_SYS_EXIT
 	DISABLE_INTERRUPTS(CLBR_ANY)
 	TRACE_IRQS_OFF
@@ -348,6 +388,24 @@ sysenter_exit:
 	PTGS_TO_GS
 	ENABLE_INTERRUPTS_SYSEXIT
 
+#ifdef CONFIG_IPIPE
+sysenter_exit_sync:
+	testl $_TIP_HEAD,TI_ipipe(%ebp)
+	jz sysenter_exit_root
+	testl $_TIP_MAYDAY,TI_ipipe(%ebp)
+	jz sysenter_exit_fast
+	movl  %esp,%eax
+	call __ipipe_call_mayday
+sysenter_exit_fast:
+	DISABLE_INTERRUPTS(CLBR_ANY)
+	TRACE_IRQS_OFF
+	jmp sysenter_exit
+sysenter_exit_root:
+	call __ipipe_root_sync
+	movl PT_EAX(%esp),%eax
+	jmp sysenter_exit_check
+#endif
+	
 .pushsection .fixup, "ax"
 2:	movl	$0, PT_FS(%esp)
 	jmp	1b
@@ -362,6 +420,26 @@ ENTRY(entry_INT80_32)
 	pushl	%eax				# save orig_eax
 	SAVE_ALL
 	GET_THREAD_INFO(%ebp)
+
+#ifdef CONFIG_IPIPE
+	/*
+	 * We currently don't implement fastcall support for
+	 * the legacy 0x80 syscall form.
+	 */
+	testl $_TIP_NOTIFY,TI_ipipe(%ebp)
+	jnz pipeline_syscall
+	cmpl $(NR_syscalls),%eax
+	jb root_syscall
+pipeline_syscall:
+	movl  %esp,%eax
+	call __ipipe_notify_syscall
+	testl $_TIP_HEAD,TI_ipipe(%ebp)
+	jnz restore_nocheck
+	testl %eax,%eax
+	jnz syscall_exit
+	movl PT_ORIG_EAX(%esp),%eax
+root_syscall:
+#endif /* CONFIG_IPIPE */
 						# system call tracing in operation / emulation
 	testl	$_TIF_WORK_SYSCALL_ENTRY, TI_flags(%ebp)
 	jnz	syscall_trace_entry
@@ -540,6 +618,75 @@ ENTRY(irq_entries_start)
     .endr
 END(irq_entries_start)
 
+#ifdef CONFIG_IPIPE
+
+	.p2align CONFIG_X86_L1_CACHE_SHIFT
+
+.Lunwind_root_irq:
+	DISABLE_INTERRUPTS(CLBR_ANY)
+	ret	/* back to __ipipe_do_IRQ() */
+
+ENTRY(do_root_irq)
+	pushfl
+	orl	$X86_EFLAGS_IF, (%esp)
+	pushl	%cs
+	pushl	$.Lunwind_root_irq
+	pushl	PT_ORIG_EAX(%eax)
+	mov	%edx, %ecx
+	SAVE_ALL
+	pushl	%eax
+	call	*%ecx
+	addl	$4, %esp
+	jmp	ret_from_intr
+END(do_root_irq)
+	
+common_interrupt:
+	ASM_CLAC;			\
+	addl $-0x80,(%esp)	/* Adjust vector into the [-256,-1] range */
+	SAVE_ALL
+	movl %esp, %eax
+	call __ipipe_handle_irq
+	testl %eax,%eax
+	jnz  ret_from_intr
+	jmp restore_nocheck
+ENDPROC(common_interrupt)
+
+	.p2align CONFIG_X86_L1_CACHE_SHIFT
+
+	.pushsection .kprobes.text, "ax"
+#define BUILD_INTERRUPT2(name, nr)	\
+ENTRY(name)				\
+	ASM_CLAC;			\
+	pushl $~(nr);			\
+	SAVE_ALL;			\
+	movl %esp, %eax;		\
+	call __ipipe_handle_irq;	\
+	testl %eax,%eax;		\
+	jnz  ret_from_intr;		\
+	jmp restore_nocheck;		\
+ENDPROC(name)
+
+/*
+ * We never call the handler directly, we have to go through the
+ * pipeline instead, which sets the proper routing in
+ * __ipipe_enable_pipeline(), so we may ignore the function arg.
+ */
+#define BUILD_INTERRUPT3(name, nr, fn)	\
+	BUILD_INTERRUPT2(name, nr)
+
+#ifdef CONFIG_X86_LOCAL_APIC
+	/*
+	 * The pipeline-specific vectors are not traced by the regular tracing
+	 * infrastructure (CONFIG_IPIPE_TRACE allows this though).
+	 */
+	BUILD_INTERRUPT2(ipipe_hrtimer_interrupt, IPIPE_HRTIMER_VECTOR)
+#ifdef CONFIG_SMP	
+	BUILD_INTERRUPT2(ipipe_reschedule_interrupt, IPIPE_RESCHEDULE_VECTOR)
+	BUILD_INTERRUPT2(ipipe_critical_interrupt, IPIPE_CRITICAL_VECTOR)
+#endif
+#endif
+
+#else /* !CONFIG_IPIPE */
 /*
  * the CPU automatically disables interrupts when executing an IRQ vector,
  * so IRQ-flags tracing has to follow that:
@@ -566,6 +713,7 @@ ENTRY(name)				\
 	jmp	ret_from_intr;		\
 ENDPROC(name)
 
+#endif /* !CONFIG_IPIPE */
 
 #ifdef CONFIG_TRACING
 # define TRACE_BUILD_INTERRUPT(name, nr)	BUILD_INTERRUPT3(trace_##name, nr, smp_trace_##name)
@@ -997,9 +1145,15 @@ error_code:
 	movl	$(__USER_DS), %ecx
 	movl	%ecx, %ds
 	movl	%ecx, %es
+#ifndef CONFIG_IPIPE
 	TRACE_IRQS_OFF
+#endif	
 	movl	%esp, %eax			# pt_regs pointer
 	call	*%edi
+#ifdef CONFIG_IPIPE
+	testl %eax,%eax
+	jnz restore_nocheck
+#endif	
 	jmp	ret_from_exception
 END(page_fault)
 
@@ -1034,7 +1188,9 @@ ENTRY(debug)
 debug_stack_correct:
 	pushl	$-1				# mark this as an int
 	SAVE_ALL
+#ifndef CONFIG_IPIPE	
 	TRACE_IRQS_OFF
+#endif	
 	xorl	%edx, %edx			# error code 0
 	movl	%esp, %eax			# pt_regs pointer
 	call	do_debug
@@ -1121,7 +1277,9 @@ ENTRY(int3)
 	ASM_CLAC
 	pushl	$-1				# mark this as an int
 	SAVE_ALL
+#ifndef CONFIG_IPIPE
 	TRACE_IRQS_OFF
+#endif
 	xorl	%edx, %edx			# zero error code
 	movl	%esp, %eax			# pt_regs pointer
 	call	do_int3
