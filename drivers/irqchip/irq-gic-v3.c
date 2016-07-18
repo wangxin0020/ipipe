@@ -384,7 +384,7 @@ static asmlinkage void __exception_irq_entry gic_handle_irq(struct pt_regs *regs
 			if (static_key_true(&supports_deactivate))
 				gic_write_eoir(irqnr);
 
-			err = handle_domain_irq(gic_data.domain, irqnr, regs);
+			err = ipipe_handle_domain_irq(gic_data.domain, irqnr, regs);
 			if (err) {
 				WARN_ONCE(true, "Unexpected interrupt received!\n");
 				if (static_key_true(&supports_deactivate)) {
@@ -401,7 +401,7 @@ static asmlinkage void __exception_irq_entry gic_handle_irq(struct pt_regs *regs
 			if (static_key_true(&supports_deactivate))
 				gic_write_dir(irqnr);
 #ifdef CONFIG_SMP
-			handle_IPI(irqnr, regs);
+			ipipe_handle_multi_ipi(irqnr, regs);
 #else
 			WARN_ONCE(true, "Unexpected SGI received!\n");
 #endif

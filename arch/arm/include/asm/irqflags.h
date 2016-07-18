@@ -5,6 +5,10 @@
 
 #include <asm/ptrace.h>
 
+#include <asm/ipipe_hwirq.h>
+
+#ifndef CONFIG_IPIPE
+
 /*
  * CPU interrupt mask handling.
  */
@@ -172,5 +176,6 @@ static inline int arch_irqs_disabled_flags(unsigned long flags)
 
 #include <asm-generic/irqflags.h>
 
+#endif /* ifndef IPIPE */
 #endif /* ifdef __KERNEL__ */
 #endif /* ifndef __ASM_ARM_IRQFLAGS_H */

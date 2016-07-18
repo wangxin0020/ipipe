@@ -59,6 +59,16 @@ static void icoll_mask_irq(struct irq_data *d)
 			icoll_base + HW_ICOLL_INTERRUPTn_CLR(d->hwirq));
 }
 
+#ifdef CONFIG_IPIPE
+static void icoll_mask_ack_irq(struct irq_data *d)
+{
+	__raw_writel(BM_ICOLL_INTERRUPTn_ENABLE,
+		     icoll_base + HW_ICOLL_INTERRUPTn_CLR(d->hwirq));
+	__raw_writel(BV_ICOLL_LEVELACK_IRQLEVELACK__LEVEL0,
+		     icoll_base + HW_ICOLL_LEVELACK);
+}
+#endif
+
 static void icoll_unmask_irq(struct irq_data *d)
 {
 	__raw_writel(BM_ICOLL_INTERRUPTn_ENABLE,
@@ -68,6 +78,9 @@ static void icoll_unmask_irq(struct irq_data *d)
 static struct irq_chip mxs_icoll_chip = {
 	.irq_ack = icoll_ack_irq,
 	.irq_mask = icoll_mask_irq,
+#ifdef CONFIG_IPIPE
+	.irq_mask_ack = icoll_mask_ack_irq,
+#endif /* CONFIG_IPIPE */
 	.irq_unmask = icoll_unmask_irq,
 };
 
@@ -77,7 +90,7 @@ asmlinkage void __exception_irq_entry icoll_handle_irq(struct pt_regs *regs)
 
 	irqnr = __raw_readl(icoll_base + HW_ICOLL_STAT_OFFSET);
 	__raw_writel(irqnr, icoll_base + HW_ICOLL_VECTOR);
-	handle_domain_irq(icoll_domain, irqnr, regs);
+	ipipe_handle_domain_irq(icoll_domain, irqnr, regs);
 }
 
 static int icoll_irq_domain_map(struct irq_domain *d, unsigned int virq,
