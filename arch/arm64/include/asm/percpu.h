@@ -16,6 +16,8 @@
 #ifndef __ASM_PERCPU_H
 #define __ASM_PERCPU_H
 
+#ifndef CONFIG_IPIPE
+
 static inline void set_my_cpu_offset(unsigned long off)
 {
 	asm volatile("msr tpidr_el1, %0" :: "r" (off) : "memory");
@@ -35,6 +37,12 @@ static inline unsigned long __my_cpu_offset(void)
 	return off;
 }
 #define __my_cpu_offset __my_cpu_offset()
+
+#endif	/* !CONFIG_IPIPE */
+
+#if defined(CONFIG_SMP) && defined(CONFIG_IPIPE)
+#define __my_cpu_offset	per_cpu_offset(ipipe_processor_id())
+#endif /* SMP && IPIPE */
 
 #define PERCPU_OP(op, asm_op)						\
 static inline unsigned long __percpu_##op(void *ptr,			\
