@@ -13,6 +13,7 @@
 #include <linux/compat.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
+#include <linux/kconfig.h>
 
 #include <asm/user.h>
 #include <asm/fpu/api.h>
@@ -595,7 +596,8 @@ switch_fpu_prepare(struct fpu *old_fpu, struct fpu *new_fpu, int cpu)
 	 * If the task has used the math, pre-load the FPU on xsave processors
 	 * or if the past 5 consecutive context-switches used math.
 	 */
-	fpu.preload = new_fpu->fpstate_active &&
+	fpu.preload = !IS_ENABLED(CONFIG_IPIPE) &&
+		new_fpu->fpstate_active &&
 		      (use_eager_fpu() || new_fpu->counter > 5);
 
 	if (old_fpu->fpregs_active) {
@@ -642,7 +644,7 @@ switch_fpu_prepare(struct fpu *old_fpu, struct fpu *new_fpu, int cpu)
  */
 static inline void switch_fpu_finish(struct fpu *new_fpu, fpu_switch_t fpu_switch)
 {
-	if (fpu_switch.preload)
+	if (!IS_ENABLED(CONFIG_IPIPE) && fpu_switch.preload)
 		copy_kernel_to_fpregs(&new_fpu->state);
 }
 
@@ -657,11 +659,12 @@ static inline void switch_fpu_finish(struct fpu *new_fpu, fpu_switch_t fpu_switc
 static inline void user_fpu_begin(void)
 {
 	struct fpu *fpu = &current->thread.fpu;
+	unsigned long flags;
 
-	preempt_disable();
+	flags = hard_preempt_disable();
 	if (!fpregs_active())
 		fpregs_activate(fpu);
-	preempt_enable();
+	hard_preempt_enable(flags);
 }
 
 /*

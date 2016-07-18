@@ -51,7 +51,7 @@ void ack_bad_irq(unsigned int irq)
 	 * completely.
 	 * But only ack when the APIC is enabled -AK
 	 */
-	ack_APIC_irq();
+	__ack_APIC_irq();
 }
 
 #define irq_stats(x)		(&per_cpu(irq_stat, x))
@@ -216,9 +216,9 @@ __visible unsigned int __irq_entry do_IRQ(struct pt_regs *regs)
 	unsigned vector = ~regs->orig_ax;
 	unsigned irq;
 
-	entering_irq();
-
 	irq = __this_cpu_read(vector_irq[vector]);
+	__ipipe_move_root_irq(irq);
+	entering_irq();
 
 	if (!handle_irq(irq, regs)) {
 		ack_APIC_irq();

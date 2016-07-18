@@ -50,6 +50,7 @@
 #include <asm/switch_to.h>
 
 asmlinkage extern void ret_from_fork(void);
+asmlinkage extern void thread_return(void);
 
 __visible DEFINE_PER_CPU(unsigned long, rsp_scratch);
 
@@ -160,6 +161,7 @@ int copy_thread_tls(unsigned long clone_flags, unsigned long sp,
 	p->thread.sp0 = (unsigned long)task_stack_page(p) + THREAD_SIZE;
 	childregs = task_pt_regs(p);
 	p->thread.sp = (unsigned long) childregs;
+	p->thread.rip = (unsigned long) thread_return;
 	set_tsk_thread_flag(p, TIF_FORK);
 	p->thread.io_bitmap_ptr = NULL;
 
@@ -275,7 +277,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	struct thread_struct *next = &next_p->thread;
 	struct fpu *prev_fpu = &prev->fpu;
 	struct fpu *next_fpu = &next->fpu;
-	int cpu = smp_processor_id();
+	int cpu = raw_smp_processor_id();
 	struct tss_struct *tss = &per_cpu(cpu_tss, cpu);
 	unsigned fsindex, gsindex;
 	fpu_switch_t fpu_switch;

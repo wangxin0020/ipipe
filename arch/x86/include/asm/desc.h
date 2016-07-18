@@ -379,9 +379,20 @@ extern int first_system_vector;
 /* used_vectors is BITMAP for irq is not managed by percpu vector_irq */
 extern unsigned long used_vectors[];
 
+#ifdef CONFIG_IPIPE
+extern int vector_irq[NR_VECTORS];
+#endif
+
 static inline void alloc_system_vector(int vector)
 {
 	if (!test_bit(vector, used_vectors)) {
+#if defined(CONFIG_X86_LOCAL_APIC) && defined(CONFIG_IPIPE)
+		unsigned cpu;
+
+		for_each_possible_cpu(cpu)
+			per_cpu(vector_irq, cpu)[vector] =
+				ipipe_apic_vector_irq(vector);
+#endif
 		set_bit(vector, used_vectors);
 		if (first_system_vector > vector)
 			first_system_vector = vector;
@@ -389,6 +400,12 @@ static inline void alloc_system_vector(int vector)
 		BUG();
 	}
 }
+
+#define alloc_intr_gate_notrace(n, addr)			\
+	do {							\
+		alloc_system_vector(n);				\
+		set_intr_gate_notrace(n, addr);			\
+	} while (0)
 
 #define alloc_intr_gate(n, addr)				\
 	do {							\
@@ -435,7 +452,7 @@ static inline void set_system_intr_gate_ist(int n, void *addr, unsigned ist)
 	_set_gate(n, GATE_INTERRUPT, addr, 0x3, ist, __KERNEL_CS);
 }
 
-#ifdef CONFIG_X86_64
+#if defined(CONFIG_X86_64) && !defined(CONFIG_IPIPE)
 DECLARE_PER_CPU(u32, debug_idt_ctr);
 static inline bool is_debug_idt_enabled(void)
 {
