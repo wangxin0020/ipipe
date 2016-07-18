@@ -2643,7 +2643,8 @@ rb_reserve_next_event(struct ring_buffer *buffer,
 static __always_inline int
 trace_recursive_lock(struct ring_buffer_per_cpu *cpu_buffer)
 {
-	unsigned int val = cpu_buffer->current_context;
+	unsigned long flags;
+	unsigned int val;
 	int bit;
 
 	if (in_interrupt()) {
@@ -2656,11 +2657,18 @@ trace_recursive_lock(struct ring_buffer_per_cpu *cpu_buffer)
 	} else
 		bit = RB_CTX_NORMAL;
 
-	if (unlikely(val & (1 << bit)))
+	flags = hard_local_irq_save();
+
+	val = cpu_buffer->current_context;
+	if (unlikely(val & (1 << bit))) {
+		hard_local_irq_restore(flags);
 		return 1;
+	}
 
 	val |= (1 << bit);
 	cpu_buffer->current_context = val;
+
+	hard_local_irq_restore(flags);
 
 	return 0;
 }
@@ -2668,7 +2676,11 @@ trace_recursive_lock(struct ring_buffer_per_cpu *cpu_buffer)
 static __always_inline void
 trace_recursive_unlock(struct ring_buffer_per_cpu *cpu_buffer)
 {
+	unsigned long flags;
+
+	flags = hard_local_irq_save();
 	cpu_buffer->current_context &= cpu_buffer->current_context - 1;
+	hard_local_irq_restore(flags);
 }
 
 /**
